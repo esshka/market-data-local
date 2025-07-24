@@ -1,6 +1,6 @@
 """Service layer for isolated business logic components."""
 
-from .realtime_coordinator import RealtimeDataCoordinator
-from .websocket_service import WebSocketService
+# Service components have been simplified and removed
+# Direct integration is now handled by simplified WebSocket client
 
-__all__ = ['RealtimeDataCoordinator', 'WebSocketService']
+__all__ = []

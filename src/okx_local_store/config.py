@@ -24,11 +24,7 @@ class WebSocketConfig:
     reconnect_delay_base: float = 1.0  # base delay for exponential backoff
     reconnect_delay_max: float = 60.0  # max delay between reconnection attempts
     enable_compression: bool = True
-    buffer_size: int = 1000  # max messages to buffer during reconnection
-    # Event processing settings
-    event_queue_size: int = 10000  # max events in event bus queues
-    batch_size: int = 100  # batch size for processing events
-    batch_timeout: float = 1.0  # max time to wait for batch completion
+    # Removed complex buffering and batching - simplified WebSocket client doesn't need these
 
 
 @dataclass

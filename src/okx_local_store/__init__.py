@@ -39,7 +39,7 @@ from .okx_store import OKXLocalStore, create_default_store
 from .config import OKXConfig, InstrumentConfig, create_default_config
 from .api_client import OKXAPIClient
 from .storage import OHLCVStorage
-from .sync_engine import SyncEngine
+from .simple_hybrid_sync_engine import SimplifiedHybridSyncEngine as SyncEngine
 from .query_interface import OHLCVQueryInterface
 
 # Convenience imports

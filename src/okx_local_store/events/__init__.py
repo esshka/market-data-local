@@ -1,15 +1,6 @@
 """Event-driven architecture components for decoupled communication."""
 
-from .realtime_events import (
-    RealtimeEventBus, RealtimeEvent, CandleDataEvent, TickerDataEvent,
-    ConnectionStatusEvent, SubscriptionStatusEvent, ErrorEvent,
-    create_candle_event, create_connection_event, create_error_event,
-    BusinessLogicEventHandler
-)
+# Event system has been simplified and removed
+# Direct callback-based message processing is now used
 
-__all__ = [
-    'RealtimeEventBus', 'RealtimeEvent', 'CandleDataEvent', 'TickerDataEvent',
-    'ConnectionStatusEvent', 'SubscriptionStatusEvent', 'ErrorEvent',
-    'create_candle_event', 'create_connection_event', 'create_error_event',
-    'BusinessLogicEventHandler'
-]
+__all__ = []

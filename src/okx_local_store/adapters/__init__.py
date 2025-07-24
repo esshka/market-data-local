@@ -1,13 +1,6 @@
 """Adapters for transforming external data formats into internal representations."""
 
-from .websocket_adapter import (
-    WebSocketDataAdapter, WebSocketMessageAdapter,
-    OKXCandleAdapter, OKXTickerAdapter, OKXEventAdapter,
-    create_okx_websocket_adapter
-)
+# WebSocket adapters have been simplified and removed
+# Direct message processing is now handled in SimpleWebSocketClient
 
-__all__ = [
-    'WebSocketDataAdapter', 'WebSocketMessageAdapter',
-    'OKXCandleAdapter', 'OKXTickerAdapter', 'OKXEventAdapter', 
-    'create_okx_websocket_adapter'
-]
+__all__ = []

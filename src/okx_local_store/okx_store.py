@@ -13,7 +13,7 @@ from .interfaces.api_client import APIClientInterface
 from .interfaces.storage import StorageInterface
 from .interfaces.sync_engine import SyncEngineInterface
 from .interfaces.query import QueryInterface
-from .factories.transport_strategy import TransportStrategyFactory, create_transport_components
+from .simple_transport_strategy import SimpleTransportStrategyFactory, create_transport_components
 from .exceptions import OKXStoreError, ConfigurationError
 
 

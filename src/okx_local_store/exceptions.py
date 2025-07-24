@@ -70,11 +70,6 @@ class WebSocketConnectionError(WebSocketError):
         self.max_retries = max_retries
 
 
-class WebSocketAuthenticationError(WebSocketError):
-    """WebSocket authentication failed."""
-    pass
-
-
 class WebSocketSubscriptionError(WebSocketError):
     """WebSocket subscription failed."""
     
