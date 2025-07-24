@@ -1,8 +1,9 @@
 """API client interface for dependency inversion."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncIterator, Callable
 from datetime import datetime
+import asyncio
 
 
 class APIClientInterface(ABC):
@@ -54,4 +55,45 @@ class APIClientInterface(ABC):
     @abstractmethod
     def get_exchange_status(self) -> Dict[str, Any]:
         """Get exchange status information."""
+        pass
+    
+    # WebSocket-specific methods
+    @abstractmethod
+    async def watch_ohlcv(
+        self, 
+        symbol: str, 
+        timeframe: str, 
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Watch OHLCV data via WebSocket."""
+        pass
+    
+    @abstractmethod
+    async def subscribe_symbol(self, symbol: str, timeframes: List[str]) -> bool:
+        """Subscribe to WebSocket updates for a symbol and timeframes."""
+        pass
+    
+    @abstractmethod
+    async def unsubscribe_symbol(self, symbol: str, timeframes: Optional[List[str]] = None) -> bool:
+        """Unsubscribe from WebSocket updates for a symbol."""
+        pass
+    
+    @abstractmethod
+    def get_websocket_status(self) -> Dict[str, Any]:
+        """Get WebSocket connection status information."""
+        pass
+    
+    @abstractmethod
+    async def start_websocket(self) -> bool:
+        """Start WebSocket connection."""
+        pass
+    
+    @abstractmethod
+    async def stop_websocket(self) -> bool:
+        """Stop WebSocket connection."""
+        pass
+    
+    @abstractmethod
+    def is_websocket_connected(self) -> bool:
+        """Check if WebSocket is connected."""
         pass

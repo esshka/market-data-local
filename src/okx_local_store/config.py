@@ -1,7 +1,7 @@
 """Configuration management for OKX Local Store."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 from pathlib import Path
 import json
 import os
@@ -13,6 +13,20 @@ from .exceptions import ConfigurationError
 
 
 @dataclass
+class WebSocketConfig:
+    """Configuration for WebSocket connections."""
+    max_reconnect_attempts: int = 5
+    heartbeat_interval: int = 30  # seconds
+    connection_timeout: int = 10  # seconds
+    ping_interval: int = 20  # seconds
+    max_connection_age: int = 3600  # seconds - reconnect after 1 hour
+    reconnect_delay_base: float = 1.0  # base delay for exponential backoff
+    reconnect_delay_max: float = 60.0  # max delay between reconnection attempts
+    enable_compression: bool = True
+    buffer_size: int = 1000  # max messages to buffer during reconnection
+
+
+@dataclass
 class InstrumentConfig(InstrumentConfigInterface):
     """Configuration for a specific instrument."""
     symbol: str
@@ -20,6 +34,11 @@ class InstrumentConfig(InstrumentConfigInterface):
     sync_interval_seconds: int = 60
     max_history_days: int = 365
     enabled: bool = True
+    
+    # WebSocket specific settings
+    realtime_source: Literal["websocket", "polling", "auto"] = "auto"
+    fallback_to_polling: bool = True
+    websocket_priority: bool = True  # prefer WebSocket over polling when both available
 
 
 @dataclass
@@ -45,6 +64,12 @@ class OKXConfig(ConfigurationProviderInterface):
     enable_auto_sync: bool = True
     sync_on_startup: bool = True
     max_concurrent_syncs: int = 3
+    
+    # WebSocket settings
+    realtime_mode: Literal["websocket", "polling", "hybrid"] = "hybrid"
+    websocket_config: WebSocketConfig = field(default_factory=WebSocketConfig)
+    enable_websocket: bool = True
+    websocket_fallback_enabled: bool = True
     
     # Logging
     log_level: str = "INFO"
@@ -82,6 +107,10 @@ class OKXConfig(ConfigurationProviderInterface):
             instruments.append(InstrumentConfig(**inst_data))
         data['instruments'] = instruments
         
+        # Convert websocket_config
+        if 'websocket_config' in data and isinstance(data['websocket_config'], dict):
+            data['websocket_config'] = WebSocketConfig(**data['websocket_config'])
+        
         return cls(**data)
 
     def save_to_file(self, config_path: Path) -> None:
@@ -96,6 +125,8 @@ class OKXConfig(ConfigurationProviderInterface):
                     data[key] = str(value)
                 elif key == 'instruments':
                     data[key] = [inst.__dict__ for inst in value]
+                elif key == 'websocket_config':
+                    data[key] = value.__dict__ if hasattr(value, '__dict__') else value
                 else:
                     data[key] = value
             

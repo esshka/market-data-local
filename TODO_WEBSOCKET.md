@@ -1,0 +1,97 @@
+# WebSocket Integration TODO
+
+Implementation of WebSocket real-time data streaming for OKX Local Store.
+
+## Phase 1: Foundation (Week 1) ✅ COMPLETED
+
+### 1.1 Dependencies and Environment ✅
+- [x] Upgrade pyproject.toml dependencies for WebSocket support
+- [x] Add asyncio and WebSocket-specific packages
+- [ ] Verify CCXT Pro WebSocket functionality works with OKX
+
+### 1.2 Configuration Extensions ✅
+- [x] Extend `OKXConfig` class with WebSocket settings
+- [x] Add `WebSocketConfig` dataclass for connection parameters
+- [x] Update `InstrumentConfig` with realtime_source option
+- [x] Add configuration validation for WebSocket settings
+- [x] Update config-example.json with WebSocket examples
+
+### 1.3 Interface Extensions ✅
+- [x] Extend `APIClientInterface` with WebSocket methods:
+  - [x] `async def watch_ohlcv()` 
+  - [x] `async def subscribe_symbol()`
+  - [x] `async def unsubscribe_symbol()`
+  - [x] `def get_connection_status()`
+- [x] Create new WebSocket-specific exception types
+- [x] Update interface documentation
+
+### 1.4 WebSocket API Client ✅
+- [x] Create `WebSocketAPIClient` class implementing extended interface
+- [x] Implement connection management and authentication
+- [x] Add automatic reconnection logic with exponential backoff
+- [x] Implement subscription management for symbols/timeframes
+- [x] Add WebSocket data parsing and normalization
+- [x] Add connection health monitoring and heartbeat
+
+## Phase 2: Core Integration (Week 2)
+
+### 2.1 Hybrid Sync Engine
+- [ ] Create `HybridSyncEngine` class extending `SyncEngineInterface`
+- [ ] Implement mode switching: WebSocket ↔ REST fallback
+- [ ] Add event-driven WebSocket data processing
+- [ ] Maintain existing polling functionality for compatibility
+- [ ] Add intelligent connection management
+- [ ] Implement data source prioritization logic
+
+### 2.2 Storage Optimizations
+- [ ] Enhance `OHLCVStorage` for real-time data ingestion
+- [ ] Add batched write operations for WebSocket streams
+- [ ] Implement data deduplication for overlapping sources
+- [ ] Add data source tracking (WebSocket vs REST)
+- [ ] Optimize database writes for high-frequency updates
+
+### 2.3 Error Handling and Recovery
+- [ ] Implement WebSocket connection failure detection
+- [ ] Add automatic fallback to REST API on WebSocket issues
+- [ ] Create connection health monitoring system
+- [ ] Add retry logic with circuit breaker pattern
+- [ ] Implement graceful degradation strategies
+
+## Phase 3: Testing & Polish (Week 3)
+
+### 3.1 Testing Infrastructure
+- [ ] Create WebSocket mock client for testing
+- [ ] Add unit tests for WebSocket API client
+- [ ] Add integration tests for hybrid sync engine
+- [ ] Create connection failure simulation tests
+- [ ] Add performance tests for real-time data handling
+- [ ] Test fallback mechanisms thoroughly
+
+### 3.2 CLI Enhancements
+- [ ] Add WebSocket status to `okx-store status` command
+- [ ] Create WebSocket connection health display
+- [ ] Add CLI options for WebSocket mode configuration
+- [ ] Implement connection testing commands
+- [ ] Add WebSocket performance metrics display
+
+### 3.3 Documentation and Examples
+- [ ] Update README.md with WebSocket usage examples
+- [ ] Create WebSocket configuration guide
+- [ ] Add performance comparison documentation
+- [ ] Create migration guide from polling to WebSocket
+- [ ] Add troubleshooting guide for WebSocket issues
+
+### 3.4 Production Hardening
+- [ ] Add comprehensive logging for WebSocket operations
+- [ ] Implement connection metrics and monitoring
+- [ ] Add resource cleanup and memory management
+- [ ] Performance optimization and benchmarking
+- [ ] Security review of WebSocket implementation
+
+## Current Status: Starting Phase 1.1 - Dependencies
+
+## Notes
+- Maintain backward compatibility throughout implementation
+- Test extensively with connection failures and edge cases
+- Document all configuration changes and new features
+- Consider performance impact of real-time data processing
