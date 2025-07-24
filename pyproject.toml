@@ -1,0 +1,28 @@
+[project]
+name = "okx-local-store"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "eugeny",email = "esshka@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "ccxt>=4.0.0",
+    "pandas>=2.0.0",
+    "schedule>=1.2.0",
+    "requests>=2.28.0",
+    "python-dateutil>=2.8.0",
+    "loguru>=0.7.0",
+]
+
+[project.scripts]
+okx-store = "okx_local_store.cli:main"
+
+[tool.poetry]
+packages = [{include = "okx_local_store", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

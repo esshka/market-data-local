@@ -1,0 +1,36 @@
+{
+  "data_dir": "data",
+  "sandbox": true,
+  "api_key": null,
+  "api_secret": null,
+  "passphrase": null,
+  "rate_limit_per_minute": 240,
+  "instruments": [
+    {
+      "symbol": "BTC-USDT",
+      "timeframes": ["1m", "5m", "1h", "1d"],
+      "sync_interval_seconds": 60,
+      "max_history_days": 365,
+      "enabled": true
+    },
+    {
+      "symbol": "ETH-USDT", 
+      "timeframes": ["1m", "5m", "1h", "1d"],
+      "sync_interval_seconds": 60,
+      "max_history_days": 365,
+      "enabled": true
+    },
+    {
+      "symbol": "SOL-USDT",
+      "timeframes": ["5m", "1h", "1d"],
+      "sync_interval_seconds": 120,
+      "max_history_days": 180,
+      "enabled": true
+    }
+  ],
+  "enable_auto_sync": true,
+  "sync_on_startup": true,
+  "max_concurrent_syncs": 3,
+  "log_level": "INFO",
+  "log_file": null
+}
