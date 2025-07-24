@@ -1,13 +1,12 @@
-"""API client interface for dependency inversion."""
+"""API client interfaces for dependency inversion with proper segregation."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator, Callable
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
-import asyncio
 
 
-class APIClientInterface(ABC):
-    """Abstract interface for API client implementations."""
+class RequestResponseClientInterface(ABC):
+    """Interface for request-response based API operations (REST)."""
     
     @abstractmethod
     def get_available_symbols(self) -> List[str]:
@@ -56,8 +55,11 @@ class APIClientInterface(ABC):
     def get_exchange_status(self) -> Dict[str, Any]:
         """Get exchange status information."""
         pass
+
+
+class RealtimeClientInterface(ABC):
+    """Interface for real-time streaming operations (WebSocket)."""
     
-    # WebSocket-specific methods
     @abstractmethod
     async def watch_ohlcv(
         self, 
@@ -97,3 +99,8 @@ class APIClientInterface(ABC):
     def is_websocket_connected(self) -> bool:
         """Check if WebSocket is connected."""
         pass
+
+
+class APIClientInterface(RequestResponseClientInterface, RealtimeClientInterface):
+    """Unified interface for backward compatibility - combines both interfaces."""
+    pass

@@ -7,18 +7,13 @@ from loguru import logger
 import sys
 
 from .config import OKXConfig, create_default_config
-from .api_client import OKXAPIClient
-from .websocket_api_client import WebSocketAPIClient
-from .storage import OHLCVStorage
-from .realtime_storage import RealtimeOHLCVStorage
-from .sync_engine import SyncEngine
-from .hybrid_sync_engine import HybridSyncEngine
 from .query_interface import OHLCVQueryInterface
 from .interfaces.config import ConfigurationProviderInterface
 from .interfaces.api_client import APIClientInterface
 from .interfaces.storage import StorageInterface
 from .interfaces.sync_engine import SyncEngineInterface
 from .interfaces.query import QueryInterface
+from .factories.transport_strategy import TransportStrategyFactory, create_transport_components
 from .exceptions import OKXStoreError, ConfigurationError
 
 
@@ -64,11 +59,21 @@ class OKXLocalStore:
             # Set up logging
             self._setup_logging()
             
-            # Initialize components (with dependency injection support)
-            self.storage = storage or self._create_storage()
-            self.api_client = api_client or self._create_api_client()
-            self.query = query_interface or OHLCVQueryInterface(self.storage, self.config)
-            self.sync_engine = sync_engine or self._create_sync_engine()
+            # Initialize components using transport strategy (with dependency injection support)
+            if storage or api_client or sync_engine:
+                # Manual dependency injection mode
+                self.storage = storage or self._create_storage_fallback()
+                self.api_client = api_client or self._create_api_client_fallback()
+                self.query = query_interface or OHLCVQueryInterface(self.storage, self.config)
+                self.sync_engine = sync_engine or self._create_sync_engine_fallback()
+                self.transport_components = None
+            else:
+                # Use transport strategy for integrated setup
+                self.transport_components = self._create_transport_components()
+                self.storage = self.transport_components['storage']
+                self.api_client = self.transport_components['api_client']
+                self.query = query_interface or OHLCVQueryInterface(self.storage, self.config)
+                self.sync_engine = self.transport_components['sync_engine']
             
             logger.info("OKX Local Store initialized")
             
@@ -98,40 +103,63 @@ class OKXLocalStore:
                 retention="7 days"
             )
 
-    def _create_api_client(self) -> APIClientInterface:
-        """Create API client with credentials from config or environment."""
+    def _create_transport_components(self) -> Dict[str, Any]:
+        """Create transport components using strategy pattern."""
         try:
             creds = self.config.get_env_credentials()
             
-            # Determine which client to create based on configuration
+            # Use transport strategy factory for clean component creation
+            components = create_transport_components(self.config, creds)
+            
+            logger.info(f"Transport components created: {components['strategy_description']}")
+            return components
+            
+        except Exception as e:
+            logger.error(f"Failed to create transport components: {e}")
+            raise ConfigurationError(f"Transport component creation failed: {e}")
+
+    def _create_storage_fallback(self) -> StorageInterface:
+        """Fallback storage creation for dependency injection mode."""
+        try:
+            # Import here to avoid circular dependencies
+            from .storage import OHLCVStorage
+            from .realtime_storage import RealtimeOHLCVStorage
+            
+            enable_websocket = getattr(self.config, 'enable_websocket', False)
+            
+            if enable_websocket:
+                logger.info("Creating real-time optimized storage for WebSocket mode")
+                return RealtimeOHLCVStorage(self.config.data_dir)
+            else:
+                # Use standard storage for polling mode
+                logger.info("Creating standard storage for polling mode")
+                return OHLCVStorage(self.config.data_dir)
+        except Exception as e:
+            logger.error(f"Failed to create storage: {e}")
+            raise ConfigurationError(f"Storage creation failed: {e}")
+    
+    def _create_api_client_fallback(self) -> APIClientInterface:
+        """Fallback API client creation for dependency injection mode."""
+        try:
+            # Import here to avoid circular dependencies
+            from .api_client import OKXAPIClient
+            from .websocket_api_client import WebSocketAPIClient
+            
+            creds = self.config.get_env_credentials()
             realtime_mode = getattr(self.config, 'realtime_mode', 'polling')
             enable_websocket = getattr(self.config, 'enable_websocket', False)
             
             if realtime_mode == 'websocket' and enable_websocket:
-                # Pure WebSocket mode
                 logger.info("Creating WebSocket API client for real-time streaming")
-                websocket_config = getattr(self.config, 'websocket_config', None)
                 return WebSocketAPIClient(
                     api_key=creds['api_key'],
                     api_secret=creds['api_secret'],
                     passphrase=creds['passphrase'],
                     sandbox=self.config.sandbox,
-                    websocket_config=websocket_config
-                )
-            elif realtime_mode in ['hybrid', 'auto'] and enable_websocket:
-                # Hybrid mode - will be handled by HybridSyncEngine
-                # Create REST client as primary, WebSocket client will be created by HybridSyncEngine
-                logger.info("Creating REST API client for hybrid mode (WebSocket client will be created by sync engine)")
-                return OKXAPIClient(
-                    api_key=creds['api_key'],
-                    api_secret=creds['api_secret'],
-                    passphrase=creds['passphrase'],
-                    sandbox=self.config.sandbox,
-                    rate_limit_per_minute=self.config.rate_limit_per_minute
+                    websocket_config=getattr(self.config, 'websocket_config', None)
                 )
             else:
-                # Pure polling mode (default)
-                logger.info("Creating REST API client for polling mode")
+                logger.info("Creating REST API client")
                 return OKXAPIClient(
                     api_key=creds['api_key'],
                     api_secret=creds['api_secret'],
@@ -143,40 +171,25 @@ class OKXLocalStore:
             logger.error(f"Failed to create API client: {e}")
             raise ConfigurationError(f"API client creation failed: {e}")
 
-    def _create_storage(self) -> StorageInterface:
-        """Create storage interface based on configuration."""
+    def _create_sync_engine_fallback(self) -> SyncEngineInterface:
+        """Fallback sync engine creation for dependency injection mode."""
         try:
-            enable_websocket = getattr(self.config, 'enable_websocket', False)
+            # Import here to avoid circular dependencies  
+            from .sync_engine import SyncEngine
+            from .hybrid_sync_engine import HybridSyncEngine
             
-            if enable_websocket:
-                # Use real-time optimized storage for WebSocket operations
-                logger.info("Creating real-time optimized storage for WebSocket mode")
-                return RealtimeOHLCVStorage(self.config.data_dir)
-            else:
-                # Use standard storage for polling mode
-                logger.info("Creating standard storage for polling mode")
-                return OHLCVStorage(self.config.data_dir)
-        except Exception as e:
-            logger.error(f"Failed to create storage: {e}")
-            raise ConfigurationError(f"Storage creation failed: {e}")
-
-    def _create_sync_engine(self) -> SyncEngineInterface:
-        """Create sync engine based on configuration."""
-        try:
             realtime_mode = getattr(self.config, 'realtime_mode', 'polling')
             enable_websocket = getattr(self.config, 'enable_websocket', False)
             
             if enable_websocket and realtime_mode in ['websocket', 'hybrid', 'auto']:
-                # Use hybrid sync engine for WebSocket functionality
                 logger.info(f"Creating HybridSyncEngine for {realtime_mode} mode")
+                # Create with old-style dependencies for backward compatibility
                 return HybridSyncEngine(
                     config=self.config,
-                    rest_client=self.api_client if realtime_mode != 'websocket' else None,
-                    storage=self.storage,
-                    websocket_client=self.api_client if realtime_mode == 'websocket' else None
+                    rest_client=self.api_client,
+                    storage=self.storage
                 )
             else:
-                # Use standard sync engine for polling mode
                 logger.info("Creating standard SyncEngine for polling mode")
                 return SyncEngine(self.config, self.api_client, self.storage)
         except Exception as e:

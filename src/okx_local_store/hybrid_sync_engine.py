@@ -1,6 +1,5 @@
-"""Hybrid sync engine supporting both WebSocket real-time and REST polling."""
+"""Hybrid sync engine focused on REST polling with real-time coordination support."""
 
-import asyncio
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -11,15 +10,13 @@ from enum import Enum
 from loguru import logger
 
 from .interfaces.sync_engine import SyncEngineInterface
-from .interfaces.api_client import APIClientInterface
+from .interfaces.api_client import RequestResponseClientInterface
 from .interfaces.storage import StorageInterface
-from .config import OKXConfig, InstrumentConfig, WebSocketConfig
-from .websocket_api_client import WebSocketAPIClient
+from .config import OKXConfig, InstrumentConfig
 from .api_client import OKXAPIClient
-from .exceptions import (
-    SyncError, WebSocketError, WebSocketConnectionError,
-    WebSocketSubscriptionError
-)
+from .exceptions import SyncError
+from .services.realtime_coordinator import RealtimeDataCoordinator
+from .events.realtime_events import RealtimeEventBus
 
 
 class SyncMode(Enum):
@@ -32,84 +29,57 @@ class SyncMode(Enum):
 
 @dataclass
 class InstrumentSyncState:
-    """Track sync state for individual instruments."""
+    """Track sync state for individual instruments (polling-focused)."""
     symbol: str
     timeframes: Set[str] = field(default_factory=set)
     current_mode: SyncMode = SyncMode.AUTO
-    websocket_active: bool = False
     polling_active: bool = False
-    last_websocket_data: Optional[datetime] = None
     last_polling_data: Optional[datetime] = None
-    websocket_failures: int = 0
     polling_failures: int = 0
-    fallback_active: bool = False
+    realtime_active: bool = False  # Managed by RealtimeDataCoordinator
     
-    def should_fallback_to_polling(self, max_failures: int = 3, timeout_seconds: int = 60) -> bool:
-        """Determine if should fallback from WebSocket to polling."""
-        # Too many WebSocket failures
-        if self.websocket_failures >= max_failures:
-            return True
-            
-        # WebSocket data timeout
-        if self.last_websocket_data:
-            time_since_data = datetime.now(timezone.utc) - self.last_websocket_data
-            if time_since_data.total_seconds() > timeout_seconds:
-                return True
-                
-        return False
-    
-    def should_retry_websocket(self, cooldown_seconds: int = 300) -> bool:
-        """Determine if should retry WebSocket after fallback."""
-        if not self.fallback_active:
-            return False
-            
-        # Don't retry if we just failed
-        if self.websocket_failures >= 3:
-            return False
-            
-        # Retry after cooldown period
-        if self.last_websocket_data:
-            time_since_failure = datetime.now(timezone.utc) - self.last_websocket_data
-            return time_since_failure.total_seconds() > cooldown_seconds
-            
-        return True
+    def should_use_polling(self) -> bool:
+        """Determine if should use polling mode."""
+        # Use polling if realtime is not active or configured for polling
+        return (self.current_mode == SyncMode.POLLING or 
+                not self.realtime_active or
+                self.polling_failures < 3)
 
 
 class HybridSyncEngine(SyncEngineInterface):
     """
-    Hybrid sync engine that intelligently combines WebSocket real-time data
-    with REST API polling for historical data and fallback scenarios.
+    Hybrid sync engine focused on REST polling with real-time coordination support.
+    WebSocket logic is handled by RealtimeDataCoordinator for proper separation.
     """
     
     def __init__(
         self, 
         config: OKXConfig, 
-        rest_client: APIClientInterface, 
+        rest_client: RequestResponseClientInterface, 
         storage: StorageInterface,
-        websocket_client: Optional[WebSocketAPIClient] = None
+        event_bus: Optional[RealtimeEventBus] = None,
+        realtime_coordinator: Optional[RealtimeDataCoordinator] = None
     ):
         """
-        Initialize hybrid sync engine.
+        Initialize hybrid sync engine focused on REST polling.
         
         Args:
-            config: Configuration with WebSocket and sync settings
-            rest_client: REST API client for historical data and fallback
+            config: Configuration with sync settings
+            rest_client: REST API client for data fetching
             storage: Storage interface for data persistence
-            websocket_client: Optional WebSocket client (created if not provided)
+            event_bus: Optional event bus for real-time integration
+            realtime_coordinator: Optional coordinator for real-time data
         """
         self.config = config
         self.rest_client = rest_client
         self.storage = storage
-        self.websocket_client = websocket_client
+        self.event_bus = event_bus
+        self.realtime_coordinator = realtime_coordinator
         
         # Sync engine state
         self._is_running = False
         self._sync_thread: Optional[threading.Thread] = None
-        self._websocket_task: Optional[asyncio.Task] = None
         self._stop_event = threading.Event()
-        
-        # Async event loop for WebSocket operations
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Instrument sync state tracking
         self._instrument_states: Dict[str, InstrumentSyncState] = {}
@@ -119,36 +89,72 @@ class HybridSyncEngine(SyncEngineInterface):
         # Mode management
         self._effective_mode = self._determine_effective_mode()
         
-        # Scheduled polling (for hybrid/polling modes)
+        # Scheduled polling executor
         self._polling_executor = ThreadPoolExecutor(max_workers=config.max_concurrent_syncs)
         
         logger.info(f"Hybrid sync engine initialized with mode: {self._effective_mode}")
     
     def _determine_effective_mode(self) -> SyncMode:
         """Determine effective sync mode based on configuration."""
-        if not self.config.enable_websocket:
-            return SyncMode.POLLING
-            
+        # This sync engine focuses on polling - real-time is handled separately
         mode_map = {
-            "websocket": SyncMode.WEBSOCKET,
+            "websocket": SyncMode.POLLING,  # Real-time handled by coordinator
             "polling": SyncMode.POLLING,
-            "hybrid": SyncMode.HYBRID
+            "hybrid": SyncMode.HYBRID,  # Polling + real-time coordination
+            "auto": SyncMode.HYBRID
         }
         
-        return mode_map.get(self.config.realtime_mode, SyncMode.HYBRID)
+        return mode_map.get(self.config.realtime_mode, SyncMode.POLLING)
     
-    def _initialize_websocket_client(self):
-        """Initialize WebSocket client if not provided."""
-        if not self.websocket_client and self._effective_mode != SyncMode.POLLING:
-            creds = self.config.get_env_credentials()
+    def _initialize_realtime_coordinator(self):
+        """Initialize real-time coordinator if needed and not provided."""
+        if (not self.realtime_coordinator and 
+            self._effective_mode == SyncMode.HYBRID and
+            self.config.enable_websocket):
             
-            self.websocket_client = WebSocketAPIClient(
-                api_key=creds.get('api_key'),
-                api_secret=creds.get('api_secret'),
-                passphrase=creds.get('passphrase'),
-                sandbox=self.config.sandbox,
-                websocket_config=self.config.websocket_config
+            # Create event bus if not provided
+            if not self.event_bus:
+                self.event_bus = RealtimeEventBus()
+            
+            # Create coordinator
+            self.realtime_coordinator = RealtimeDataCoordinator(
+                config=self.config,
+                storage=self.storage,
+                event_bus=self.event_bus
             )
+    
+    def _run_realtime_coordinator(self):
+        """Run real-time coordinator in separate event loop."""
+        import asyncio
+        
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Start event bus
+            loop.run_until_complete(self.event_bus.start())
+            
+            # Start coordinator
+            loop.run_until_complete(self.realtime_coordinator.start())
+            
+            # Keep running until stop event
+            while not self._stop_event.is_set():
+                loop.run_until_complete(asyncio.sleep(1))
+                
+        except Exception as e:
+            logger.error(f"Error in realtime coordinator thread: {e}")
+        finally:
+            # Cleanup
+            try:
+                if self.realtime_coordinator:
+                    loop.run_until_complete(self.realtime_coordinator.stop())
+                if self.event_bus:
+                    loop.run_until_complete(self.event_bus.stop())
+            except Exception as e:
+                logger.error(f"Error cleaning up realtime coordinator: {e}")
+            finally:
+                loop.close()
     
     def start(self) -> None:
         """Start the hybrid sync engine."""
@@ -159,15 +165,20 @@ class HybridSyncEngine(SyncEngineInterface):
         self._is_running = True
         self._stop_event.clear()
         
-        # Initialize WebSocket client if needed
-        self._initialize_websocket_client()
+        # Initialize real-time coordinator if needed
+        self._initialize_realtime_coordinator()
         
         # Initialize instrument states
         self._initialize_instrument_states()
         
-        # Start async WebSocket operations in separate thread
-        if self._effective_mode in [SyncMode.WEBSOCKET, SyncMode.HYBRID]:
-            self._sync_thread = threading.Thread(target=self._run_async_operations, daemon=True)
+        # Start real-time coordinator if available
+        if self.realtime_coordinator and self._effective_mode == SyncMode.HYBRID:
+            # Start coordinator in background thread
+            import asyncio
+            self._sync_thread = threading.Thread(
+                target=self._run_realtime_coordinator, 
+                daemon=True
+            )
             self._sync_thread.start()
         
         # Run initial sync if configured

@@ -1,7 +1,7 @@
 """Configuration management for OKX Local Store."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Literal
+from typing import Dict, List, Optional, Literal, Any
 from pathlib import Path
 import json
 import os
@@ -14,16 +14,21 @@ from .exceptions import ConfigurationError
 
 @dataclass
 class WebSocketConfig:
-    """Configuration for WebSocket connections."""
+    """Configuration for WebSocket connections (isolated from core logic)."""
     max_reconnect_attempts: int = 5
     heartbeat_interval: int = 30  # seconds
     connection_timeout: int = 10  # seconds
     ping_interval: int = 20  # seconds
+    ping_timeout: int = 60  # seconds
     max_connection_age: int = 3600  # seconds - reconnect after 1 hour
     reconnect_delay_base: float = 1.0  # base delay for exponential backoff
     reconnect_delay_max: float = 60.0  # max delay between reconnection attempts
     enable_compression: bool = True
     buffer_size: int = 1000  # max messages to buffer during reconnection
+    # Event processing settings
+    event_queue_size: int = 10000  # max events in event bus queues
+    batch_size: int = 100  # batch size for processing events
+    batch_timeout: float = 1.0  # max time to wait for batch completion
 
 
 @dataclass
@@ -35,10 +40,11 @@ class InstrumentConfig(InstrumentConfigInterface):
     max_history_days: int = 365
     enabled: bool = True
     
-    # WebSocket specific settings
+    # Transport settings (abstracted from WebSocket specifics)
     realtime_source: Literal["websocket", "polling", "auto"] = "auto"
     fallback_to_polling: bool = True
-    websocket_priority: bool = True  # prefer WebSocket over polling when both available
+    prefer_realtime: bool = True  # prefer real-time over polling when both available
+    realtime_timeout_seconds: int = 300  # timeout for real-time data before fallback
 
 
 @dataclass
@@ -65,21 +71,93 @@ class OKXConfig(ConfigurationProviderInterface):
     sync_on_startup: bool = True
     max_concurrent_syncs: int = 3
     
-    # WebSocket settings
-    realtime_mode: Literal["websocket", "polling", "hybrid"] = "hybrid"
+    # Transport Strategy Configuration (abstracted from implementation details)
+    transport_mode: Literal["polling", "realtime", "hybrid", "auto"] = "hybrid"
+    enable_realtime: bool = True  # Enable real-time features (WebSocket)
+    enable_polling_fallback: bool = True  # Enable polling fallback when real-time fails
+    
+    # Real-time transport settings (WebSocket configuration isolated)
     websocket_config: WebSocketConfig = field(default_factory=WebSocketConfig)
-    enable_websocket: bool = True
-    websocket_fallback_enabled: bool = True
+    
+    # Backward compatibility (deprecated - use transport_mode instead)
+    realtime_mode: Optional[Literal["websocket", "polling", "hybrid"]] = None
+    enable_websocket: Optional[bool] = None
+    websocket_fallback_enabled: Optional[bool] = None
     
     # Logging
     log_level: str = "INFO"
     log_file: Optional[Path] = None
 
     def __post_init__(self):
+        # Path conversion
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if self.log_file and isinstance(self.log_file, str):
             self.log_file = Path(self.log_file)
+        
+        # Migrate deprecated configuration to new transport strategy format
+        self._migrate_transport_config()
+    
+    def _migrate_transport_config(self):
+        """Migrate deprecated configuration options to new transport strategy format."""
+        # Handle realtime_mode -> transport_mode migration
+        if self.realtime_mode is not None:
+            mode_mapping = {
+                "websocket": "realtime",
+                "polling": "polling", 
+                "hybrid": "hybrid"
+            }
+            self.transport_mode = mode_mapping.get(self.realtime_mode, "hybrid")
+            self.realtime_mode = None  # Clear deprecated field
+        
+        # Handle enable_websocket -> enable_realtime migration
+        if self.enable_websocket is not None:
+            self.enable_realtime = self.enable_websocket
+            self.enable_websocket = None  # Clear deprecated field
+        
+        # Handle websocket_fallback_enabled -> enable_polling_fallback migration
+        if self.websocket_fallback_enabled is not None:
+            self.enable_polling_fallback = self.websocket_fallback_enabled
+            self.websocket_fallback_enabled = None  # Clear deprecated field
+    
+    def get_transport_strategy_config(self) -> Dict[str, Any]:
+        """Get configuration for transport strategy selection."""
+        return {
+            "transport_mode": self.transport_mode,
+            "enable_realtime": self.enable_realtime,
+            "enable_polling_fallback": self.enable_polling_fallback,
+            "websocket_config": self.websocket_config,
+            "max_concurrent_syncs": self.max_concurrent_syncs
+        }
+    
+    def get_realtime_instruments(self) -> List[InstrumentConfig]:
+        """Get instruments configured for real-time data."""
+        return [
+            inst for inst in self.instruments 
+            if inst.enabled and inst.realtime_source in ["websocket", "auto"]
+        ]
+    
+    def get_polling_instruments(self) -> List[InstrumentConfig]:
+        """Get instruments configured for polling data."""
+        return [
+            inst for inst in self.instruments 
+            if inst.enabled and inst.realtime_source in ["polling", "auto"]
+        ]
+    
+    def should_use_realtime_transport(self) -> bool:
+        """Determine if real-time transport should be used."""
+        return (
+            self.enable_realtime and 
+            self.transport_mode in ["realtime", "hybrid", "auto"] and
+            len(self.get_realtime_instruments()) > 0
+        )
+    
+    def should_use_polling_transport(self) -> bool:
+        """Determine if polling transport should be used."""
+        return (
+            self.transport_mode in ["polling", "hybrid", "auto"] and
+            (len(self.get_polling_instruments()) > 0 or self.enable_polling_fallback)
+        )
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'OKXConfig':
