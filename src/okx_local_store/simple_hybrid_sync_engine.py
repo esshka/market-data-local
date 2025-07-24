@@ -69,6 +69,22 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
         
         logger.info("Simplified hybrid sync engine initialized")
 
+    def _safe_async_call(self, coro):
+        """Safely call async function from sync context."""
+        def run_async():
+            try:
+                asyncio.run(coro)
+            except Exception as e:
+                logger.error(f"Async call failed: {e}")
+        
+        try:
+            # Always run in thread pool to avoid event loop conflicts
+            future = self._polling_executor.submit(run_async)
+            # Don't wait for completion to avoid blocking
+            return future
+        except Exception as e:
+            logger.error(f"Failed to submit async task: {e}")
+
     def add_symbol(self, symbol: str, timeframes: List[str], config: Optional[InstrumentConfig] = None):
         """Add symbol for synchronization."""
         if symbol not in self._instrument_states:
@@ -84,7 +100,7 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
         if symbol in self._instrument_states:
             # Stop WebSocket subscription if active
             if self._instrument_states[symbol].websocket_active:
-                asyncio.create_task(self.websocket_client.unsubscribe(
+                self._safe_async_call(self.websocket_client.unsubscribe(
                     symbol, list(self._instrument_states[symbol].timeframes)
                 ))
             
@@ -99,11 +115,35 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
         self._is_running = True
         self._stop_event.clear()
         
+        # Load instruments from configuration
+        self._setup_instruments()
+        
         # Start sync thread
         self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
         self._sync_thread.start()
         
         logger.info("Simplified hybrid sync engine started")
+
+    def _setup_instruments(self):
+        """Setup instruments from configuration."""
+        logger.info("Setting up instruments from configuration")
+        
+        for instrument_config in self.config.instruments:
+            if instrument_config.enabled:
+                # Add symbol to sync engine
+                self.add_symbol(
+                    symbol=instrument_config.symbol,
+                    timeframes=instrument_config.timeframes,
+                    config=instrument_config
+                )
+                logger.info(
+                    f"Loaded instrument {instrument_config.symbol} "
+                    f"with timeframes {instrument_config.timeframes}"
+                )
+            else:
+                logger.debug(f"Skipping disabled instrument {instrument_config.symbol}")
+        
+        logger.info(f"Loaded {len(self._instrument_states)} instruments for sync")
 
     def stop(self):
         """Stop the sync engine."""
@@ -113,8 +153,8 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
         self._is_running = False
         self._stop_event.set()
         
-        # Stop WebSocket connections
-        asyncio.create_task(self.websocket_client.disconnect())
+        # Stop WebSocket connections safely
+        self._safe_async_call(self.websocket_client.disconnect())
         
         # Wait for sync thread
         if self._sync_thread:
@@ -131,6 +171,10 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
             logger.error(f"Symbol {symbol} not configured for sync")
             return False
             
+        if not self.rest_client:
+            logger.warning(f"No REST client available for sync of {symbol} - WebSocket-only mode")
+            return False
+            
         state = self._instrument_states[symbol]
         sync_timeframes = timeframes or list(state.timeframes)
         
@@ -140,7 +184,7 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
                 latest_data = self.storage.get_latest_timestamp(symbol, timeframe)
                 
                 # Fetch new data from API
-                data = self.rest_client.get_ohlcv_data(
+                data = self.rest_client.fetch_ohlcv(
                     symbol=symbol,
                     timeframe=timeframe,
                     since=latest_data
@@ -196,7 +240,7 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
                     
                     if not state.websocket_active:
                         # Start WebSocket subscription
-                        asyncio.create_task(self._start_websocket_subscription(symbol, state))
+                        self._safe_async_call(self._start_websocket_subscription(symbol, state))
                     state.polling_active = False
                 else:
                     # WebSocket not working, use polling
@@ -269,11 +313,12 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
             except Exception as e:
                 logger.error(f"Polling sync failed for {symbol}: {e}")
 
-    def get_sync_status(self) -> Dict[str, Dict[str, any]]:
-        """Get current sync status for all symbols."""
-        status = {}
+    def get_sync_status(self) -> Dict[str, any]:
+        """Get current sync status."""
+        # Build instrument states dict
+        instrument_states = {}
         for symbol, state in self._instrument_states.items():
-            status[symbol] = {
+            instrument_states[symbol] = {
                 'current_mode': state.current_mode.value,
                 'polling_active': state.polling_active,
                 'websocket_active': state.websocket_active,
@@ -282,8 +327,207 @@ class SimplifiedHybridSyncEngine(SyncEngineInterface):
                 'polling_failures': state.polling_failures,
                 'timeframes': list(state.timeframes)
             }
-        return status
+        
+        # WebSocket status
+        websocket_status = {
+            'connected': self.websocket_client.is_connected() if self.websocket_client else False,
+            'state': self.websocket_client.state.value if self.websocket_client else 'disconnected',
+            'subscriptions': len(self.websocket_client.subscriptions) if self.websocket_client else 0,
+            'messages_received': getattr(self.websocket_client, 'messages_received', 0),
+            'reconnect_attempts': getattr(self.websocket_client, 'reconnect_attempts', 0)
+        }
+        
+        # Count active states
+        active_polling = sum(1 for state in self._instrument_states.values() if state.polling_active)
+        active_websocket = sum(1 for state in self._instrument_states.values() if state.websocket_active)
+        
+        return {
+            'is_running': self._is_running,
+            'scheduled_jobs': len(self._instrument_states),  # Use instrument count as proxy
+            'effective_mode': 'hybrid',  # Always hybrid for this engine
+            'websocket_status': websocket_status,
+            'instrument_states': instrument_states,
+            'active_counts': {
+                'polling': active_polling,
+                'websocket': active_websocket,
+                'total_instruments': len(self._instrument_states)
+            },
+            'recent_errors': [],  # Could be enhanced to track recent errors
+            'last_sync_times': {symbol: state.last_polling_data or state.last_websocket_data 
+                              for symbol, state in self._instrument_states.items()}
+        }
 
+    @property
     def is_running(self) -> bool:
         """Check if sync engine is running."""
         return self._is_running
+
+    # Abstract method implementations required by SyncEngineInterface
+
+    def sync_all_instruments(self) -> None:
+        """Sync all enabled instruments."""
+        logger.info("Starting sync for all instruments")
+        for symbol in self._instrument_states.keys():
+            self.sync_now(symbol)
+        logger.info("Completed sync for all instruments")
+
+    def sync_instrument(self, symbol: str) -> None:
+        """Sync all timeframes for a specific instrument."""
+        if symbol not in self._instrument_states:
+            logger.error(f"Symbol {symbol} not configured for sync")
+            return
+        
+        logger.info(f"Syncing instrument {symbol}")
+        self.sync_now(symbol)
+
+    def sync_timeframe(self, symbol: str, timeframe: str) -> None:
+        """Sync a specific symbol and timeframe."""
+        if symbol not in self._instrument_states:
+            logger.error(f"Symbol {symbol} not configured for sync")
+            return
+            
+        if timeframe not in self._instrument_states[symbol].timeframes:
+            logger.warning(f"Timeframe {timeframe} not configured for {symbol}")
+            
+        logger.info(f"Syncing {symbol} {timeframe}")
+        self.sync_now(symbol, [timeframe])
+
+    def backfill_historical_data(
+        self, 
+        symbol: str, 
+        timeframe: str, 
+        start_date: datetime, 
+        end_date: Optional[datetime] = None
+    ) -> None:
+        """Backfill historical data for a specific time range."""
+        if symbol not in self._instrument_states:
+            logger.error(f"Symbol {symbol} not configured for sync")
+            return
+            
+        end_date = end_date or datetime.now(timezone.utc)
+        logger.info(f"Backfilling {symbol} {timeframe} from {start_date} to {end_date}")
+        
+        if not self.rest_client:
+            logger.error(f"No REST client available for backfill of {symbol} {timeframe} - WebSocket-only mode")
+            raise SyncError("Backfill not available in WebSocket-only mode")
+            
+        try:
+            # Use fetch_historical_range for the entire date range
+            # The API client will handle chunking internally
+            data = self.rest_client.fetch_historical_range(
+                symbol=symbol,
+                timeframe=timeframe,
+                start_time=start_date,
+                end_time=end_date,
+                max_requests=50  # Allow more requests for backfill
+            )
+            
+            if data:
+                self.storage.store_ohlcv_data(symbol, timeframe, data)
+                logger.info(f"Backfilled {len(data)} candles for {symbol} {timeframe}")
+            else:
+                logger.warning(f"No data returned for backfill of {symbol} {timeframe}")
+                
+        except Exception as e:
+            logger.error(f"Backfill failed for {symbol} {timeframe}: {e}")
+            raise SyncError(f"Backfill failed: {e}")
+
+    def detect_and_fill_gaps(self, symbol: str, timeframe: str, max_gap_days: int = 7) -> None:
+        """Detect gaps in local data and fill them."""
+        if symbol not in self._instrument_states:
+            logger.error(f"Symbol {symbol} not configured for sync")
+            return
+            
+        logger.info(f"Detecting gaps for {symbol} {timeframe}")
+        
+        try:
+            # Check if we have any data first
+            record_count = self.storage.get_record_count(symbol, timeframe)
+            if record_count == 0:
+                logger.info(f"No existing data for {symbol} {timeframe}")
+                return
+            
+            # Convert timeframe to milliseconds for gap detection
+            timeframe_ms = self._timeframe_to_ms(timeframe)
+            
+            # Find gaps using storage interface
+            gaps = self.storage.find_gaps(symbol, timeframe, timeframe_ms)
+            
+            if not gaps:
+                logger.info(f"No gaps found for {symbol} {timeframe}")
+                return
+                
+            logger.info(f"Found {len(gaps)} gaps for {symbol} {timeframe}")
+            
+            # Fill gaps that are within the max_gap_days limit
+            max_gap_duration = timedelta(days=max_gap_days)
+            
+            for gap_start, gap_end in gaps:
+                gap_duration = gap_end - gap_start
+                
+                if gap_duration <= max_gap_duration:
+                    logger.info(f"Filling gap for {symbol} {timeframe} from {gap_start} to {gap_end}")
+                    self.backfill_historical_data(symbol, timeframe, gap_start, gap_end)
+                else:
+                    logger.warning(f"Gap too large ({gap_duration}) for {symbol} {timeframe}, skipping")
+                
+            logger.info(f"Gap detection completed for {symbol} {timeframe}")
+            
+        except Exception as e:
+            logger.error(f"Gap detection failed for {symbol} {timeframe}: {e}")
+            raise SyncError(f"Gap detection failed: {e}")
+
+    def _timeframe_to_ms(self, timeframe: str) -> int:
+        """Convert timeframe string to milliseconds."""
+        timeframe_map = {
+            '1m': 60 * 1000,
+            '3m': 3 * 60 * 1000,
+            '5m': 5 * 60 * 1000,
+            '15m': 15 * 60 * 1000,
+            '30m': 30 * 60 * 1000,
+            '1h': 60 * 60 * 1000,
+            '1H': 60 * 60 * 1000,
+            '2H': 2 * 60 * 60 * 1000,
+            '4H': 4 * 60 * 60 * 1000,
+            '6H': 6 * 60 * 60 * 1000,
+            '12H': 12 * 60 * 60 * 1000,
+            '1d': 24 * 60 * 60 * 1000,
+            '1D': 24 * 60 * 60 * 1000,
+            '1w': 7 * 24 * 60 * 60 * 1000,
+            '1W': 7 * 24 * 60 * 60 * 1000,
+            '1M': 30 * 24 * 60 * 60 * 1000,
+            '3M': 90 * 24 * 60 * 60 * 1000,
+        }
+        return timeframe_map.get(timeframe, 60 * 1000)  # Default to 1 minute
+
+    def force_sync_now(self, symbol: Optional[str] = None) -> None:
+        """Force immediate sync for a symbol or all symbols."""
+        if symbol:
+            logger.info(f"Force syncing {symbol}")
+            if symbol not in self._instrument_states:
+                logger.error(f"Symbol {symbol} not configured for sync")
+                return
+            self.sync_now(symbol)
+        else:
+            logger.info("Force syncing all instruments")
+            self.sync_all_instruments()
+
+    def add_instrument_sync(
+        self, 
+        symbol: str, 
+        timeframes: List[str], 
+        sync_interval: int = 60
+    ) -> None:
+        """Add a new instrument to sync schedule."""
+        logger.info(f"Adding instrument sync for {symbol} with timeframes {timeframes}")
+        self.add_symbol(symbol, timeframes)
+        
+        # Store sync interval in instrument state if needed
+        if symbol in self._instrument_states:
+            # We could extend InstrumentSyncState to include sync_interval if needed
+            pass
+
+    def remove_instrument_sync(self, symbol: str) -> None:
+        """Remove an instrument from sync schedule."""
+        logger.info(f"Removing instrument sync for {symbol}")
+        self.remove_symbol(symbol)

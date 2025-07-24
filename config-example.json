@@ -1,59 +1,48 @@
 {
-  "data_dir": "data",
-  "sandbox": true,
-  "api_key": null,
-  "api_secret": null,
-  "passphrase": null,
-  "rate_limit_per_minute": 240,
-  "instruments": [
-    {
-      "symbol": "BTC-USDT",
-      "timeframes": ["1m", "5m", "1h", "1d"],
-      "sync_interval_seconds": 60,
-      "max_history_days": 365,
-      "enabled": true,
-      "realtime_source": "auto",
-      "fallback_to_polling": true,
-      "websocket_priority": true
+    "data_dir": "data",
+    "sandbox": true,
+    "rate_limit_per_minute": 240,
+    "realtime_mode": "websocket",
+    "enable_websocket": true,
+    "websocket_fallback_enabled": true,
+    "websocket_config": {
+      "max_reconnect_attempts": 5,
+      "heartbeat_interval": 30,
+      "connection_timeout": 10,
+      "ping_interval": 20,
+      "ping_timeout": 60,
+      "max_connection_age": 3600,
+      "reconnect_delay_base": 1.0,
+      "reconnect_delay_max": 60.0,
+      "enable_compression": true
     },
-    {
-      "symbol": "ETH-USDT", 
-      "timeframes": ["1m", "5m", "1h", "1d"],
-      "sync_interval_seconds": 60,
-      "max_history_days": 365,
-      "enabled": true,
-      "realtime_source": "websocket",
-      "fallback_to_polling": true,
-      "websocket_priority": true
-    },
-    {
-      "symbol": "SOL-USDT",
-      "timeframes": ["5m", "1h", "1d"],
-      "sync_interval_seconds": 120,
-      "max_history_days": 180,
-      "enabled": true,
-      "realtime_source": "polling",
-      "fallback_to_polling": true,
-      "websocket_priority": false
-    }
-  ],
-  "enable_auto_sync": true,
-  "sync_on_startup": true,
-  "max_concurrent_syncs": 3,
-  "realtime_mode": "hybrid",
-  "websocket_config": {
-    "max_reconnect_attempts": 5,
-    "heartbeat_interval": 30,
-    "connection_timeout": 10,
-    "ping_interval": 20,
-    "max_connection_age": 3600,
-    "reconnect_delay_base": 1.0,
-    "reconnect_delay_max": 60.0,
-    "enable_compression": true,
-    "buffer_size": 1000
-  },
-  "enable_websocket": true,
-  "websocket_fallback_enabled": true,
-  "log_level": "INFO",
-  "log_file": null
-}
+    "instruments": [
+      {
+        "symbol": "BTC-USDT",
+        "timeframes": ["1m", "5m", "1h"],
+        "sync_interval_seconds": 60,
+        "max_history_days": 365,
+        "enabled": true,
+        "realtime_source": "websocket",
+        "fallback_to_polling": true,
+        "prefer_realtime": true,
+        "realtime_timeout_seconds": 300
+      },
+      {
+        "symbol": "ETH-USDT",
+        "timeframes": ["1m", "1h"],
+        "sync_interval_seconds": 60,
+        "max_history_days": 365,
+        "enabled": true,
+        "realtime_source": "websocket",
+        "fallback_to_polling": true,
+        "prefer_realtime": true,
+        "realtime_timeout_seconds": 300
+      }
+    ],
+    "enable_auto_sync": true,
+    "sync_on_startup": true,
+    "max_concurrent_syncs": 3,
+    "log_level": "INFO",
+    "log_file": null
+  }

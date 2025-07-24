@@ -191,9 +191,11 @@ class OKXLocalStore:
         """Start the local store with automatic syncing."""
         logger.info("Starting OKX Local Store...")
         
-        # Test API connection
-        if not self.api_client.test_connection():
+        # Test API connection (if available)
+        if self.api_client and not self.api_client.test_connection():
             logger.warning("API connection test failed - continuing with limited functionality")
+        elif not self.api_client:
+            logger.info("WebSocket-only mode - no REST API client available")
         
         # Start sync engine
         if self.config.enable_auto_sync:
@@ -303,8 +305,9 @@ class OKXLocalStore:
             'sync_engine': self.sync_engine.get_sync_status(),
             'storage': self.storage.get_storage_stats(),
             'api_client': {
-                'connection_ok': self.api_client.test_connection(),
-                'sandbox_mode': self.config.sandbox
+                'connection_ok': self.api_client.test_connection() if self.api_client else False,
+                'sandbox_mode': self.config.sandbox,
+                'websocket_only_mode': self.api_client is None
             }
         }
 

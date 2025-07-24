@@ -321,6 +321,10 @@ class SimpleWebSocketClient:
         """Check if WebSocket is connected."""
         return self.state == ConnectionState.CONNECTED
 
+    def test_connection(self) -> bool:
+        """Test WebSocket connection (compatibility method for API client interface)."""
+        return self.is_connected()
+
     def _get_okx_channel(self, timeframe: str) -> str:
         """Map internal timeframe to OKX WebSocket channel format."""
         # OKX WebSocket channels use specific formats
