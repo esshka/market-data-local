@@ -7,14 +7,17 @@ from functools import lru_cache
 import threading
 from loguru import logger
 
-from .storage import OHLCVStorage
-from .config import OKXConfig
+from .interfaces.storage import StorageInterface
+from .interfaces.config import ConfigurationProviderInterface
+from .interfaces.query import QueryInterface
+from .utils.timeframes import get_timeframe_duration_minutes
+from .exceptions import QueryError
 
 
-class OHLCVQueryInterface:
+class OHLCVQueryInterface(QueryInterface):
     """High-level interface for querying local OHLCV data."""
     
-    def __init__(self, storage: OHLCVStorage, config: OKXConfig):
+    def __init__(self, storage: StorageInterface, config: ConfigurationProviderInterface):
         self.storage = storage
         self.config = config
         self._cache_lock = threading.RLock()
@@ -347,12 +350,7 @@ class OHLCVQueryInterface:
 
     def _timeframe_to_minutes(self, timeframe: str) -> Optional[int]:
         """Convert timeframe string to minutes."""
-        tf_map = {
-            '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
-            '1h': 60, '1H': 60, '2H': 120, '4H': 240, '6H': 360, '12H': 720,
-            '1d': 1440, '1D': 1440, '1w': 10080, '1W': 10080
-        }
-        return tf_map.get(timeframe)
+        return get_timeframe_duration_minutes(timeframe)
 
     def export_to_csv(
         self, 

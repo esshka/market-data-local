@@ -9,8 +9,12 @@ import threading
 from contextlib import contextmanager
 from loguru import logger
 
+from .interfaces.storage import StorageInterface
+from .utils.database import DatabaseHelper
+from .exceptions import StorageError, DatabaseError
 
-class OHLCVStorage:
+
+class OHLCVStorage(StorageInterface):
     """SQLite-based storage for OHLCV candlestick data."""
     
     def __init__(self, data_dir: Path):
@@ -93,37 +97,49 @@ class OHLCVStorage:
         if not data:
             return 0
 
-        with self._get_connection(symbol) as conn:
-            self._create_table(conn, timeframe)
-            table_name = self._table_name(timeframe)
-            
-            current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-            
-            # Prepare data for insertion
-            records = []
-            for candle in data:
-                records.append((
-                    int(candle['timestamp']),
-                    float(candle['open']),
-                    float(candle['high']),
-                    float(candle['low']),
-                    float(candle['close']),
-                    float(candle['volume']),
-                    float(candle.get('vol_currency', 0)),
-                    current_time
-                ))
-            
-            # Use INSERT OR REPLACE for upsert behavior
-            conn.executemany(f"""
-                INSERT OR REPLACE INTO {table_name} 
-                (timestamp, open, high, low, close, volume, vol_currency, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, records)
-            
-            conn.commit()
-            
-            logger.info(f"Stored {len(records)} candles for {symbol} {timeframe}")
-            return len(records)
+        try:
+            with self._get_connection(symbol) as conn:
+                self._create_table(conn, timeframe)
+                table_name = self._table_name(timeframe)
+                
+                current_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+                
+                # Prepare data for insertion
+                records = []
+                for candle in data:
+                    try:
+                        records.append((
+                            int(candle['timestamp']),
+                            float(candle['open']),
+                            float(candle['high']),
+                            float(candle['low']),
+                            float(candle['close']),
+                            float(candle['volume']),
+                            float(candle.get('vol_currency', 0)),
+                            current_time
+                        ))
+                    except (KeyError, ValueError, TypeError) as e:
+                        logger.warning(f"Invalid candle data for {symbol} {timeframe}: {e}")
+                        continue
+                
+                if not records:
+                    logger.warning(f"No valid records to store for {symbol} {timeframe}")
+                    return 0
+                
+                # Use transaction for atomic operation
+                with DatabaseHelper.transaction(conn):
+                    conn.executemany(f"""
+                        INSERT OR REPLACE INTO {table_name} 
+                        (timestamp, open, high, low, close, volume, vol_currency, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, records)
+                
+                logger.info(f"Stored {len(records)} candles for {symbol} {timeframe}")
+                return len(records)
+                
+        except Exception as e:
+            logger.error(f"Error storing OHLCV data for {symbol} {timeframe}: {e}")
+            raise StorageError(f"Failed to store data for {symbol} {timeframe}: {e}")
 
     def get_ohlcv_data(
         self, 
@@ -196,12 +212,7 @@ class OHLCVStorage:
         with self._get_connection(symbol) as conn:
             table_name = self._table_name(timeframe)
             
-            cursor = conn.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name=?
-            """, (table_name,))
-            
-            if not cursor.fetchone():
+            if not DatabaseHelper.table_exists(conn, table_name):
                 return None
             
             cursor = conn.execute(f"""
@@ -219,12 +230,7 @@ class OHLCVStorage:
         with self._get_connection(symbol) as conn:
             table_name = self._table_name(timeframe)
             
-            cursor = conn.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name=?
-            """, (table_name,))
-            
-            if not cursor.fetchone():
+            if not DatabaseHelper.table_exists(conn, table_name):
                 return None
             
             cursor = conn.execute(f"""

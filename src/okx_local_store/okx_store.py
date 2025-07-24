@@ -11,6 +11,12 @@ from .api_client import OKXAPIClient
 from .storage import OHLCVStorage
 from .sync_engine import SyncEngine
 from .query_interface import OHLCVQueryInterface
+from .interfaces.config import ConfigurationProviderInterface
+from .interfaces.api_client import APIClientInterface
+from .interfaces.storage import StorageInterface
+from .interfaces.sync_engine import SyncEngineInterface
+from .interfaces.query import QueryInterface
+from .exceptions import OKXStoreError, ConfigurationError
 
 
 class OKXLocalStore:
@@ -21,34 +27,51 @@ class OKXLocalStore:
     to provide a complete solution for caching OKX market data locally.
     """
     
-    def __init__(self, config_path: Optional[Path] = None, config: Optional[OKXConfig] = None):
+    def __init__(
+        self, 
+        config_path: Optional[Path] = None, 
+        config: Optional[ConfigurationProviderInterface] = None,
+        api_client: Optional[APIClientInterface] = None,
+        storage: Optional[StorageInterface] = None,
+        sync_engine: Optional[SyncEngineInterface] = None,
+        query_interface: Optional[QueryInterface] = None
+    ):
         """
         Initialize OKX Local Store.
         
         Args:
             config_path: Path to configuration file
             config: Configuration object (alternative to config_path)
+            api_client: Custom API client (for dependency injection)
+            storage: Custom storage implementation (for dependency injection)
+            sync_engine: Custom sync engine (for dependency injection)
+            query_interface: Custom query interface (for dependency injection)
         """
-        # Load or create configuration
-        if config:
-            self.config = config
-        elif config_path:
-            self.config = OKXConfig.load_from_file(config_path)
-        else:
-            # Use default config path
-            default_config_path = Path.home() / '.okx_local_store' / 'config.json'
-            self.config = OKXConfig.load_from_file(default_config_path)
-        
-        # Set up logging
-        self._setup_logging()
-        
-        # Initialize components
-        self.storage = OHLCVStorage(self.config.data_dir)
-        self.api_client = self._create_api_client()
-        self.query = OHLCVQueryInterface(self.storage, self.config)
-        self.sync_engine = SyncEngine(self.config, self.api_client, self.storage)
-        
-        logger.info("OKX Local Store initialized")
+        try:
+            # Load or create configuration
+            if config:
+                self.config = config
+            elif config_path:
+                self.config = OKXConfig.load_from_file(config_path)
+            else:
+                # Use default config path
+                default_config_path = Path.home() / '.okx_local_store' / 'config.json'
+                self.config = OKXConfig.load_from_file(default_config_path)
+            
+            # Set up logging
+            self._setup_logging()
+            
+            # Initialize components (with dependency injection support)
+            self.storage = storage or OHLCVStorage(self.config.data_dir)
+            self.api_client = api_client or self._create_api_client()
+            self.query = query_interface or OHLCVQueryInterface(self.storage, self.config)
+            self.sync_engine = sync_engine or SyncEngine(self.config, self.api_client, self.storage)
+            
+            logger.info("OKX Local Store initialized")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize OKX Local Store: {e}")
+            raise OKXStoreError(f"Initialization failed: {e}")
 
     def _setup_logging(self):
         """Set up logging configuration."""
@@ -72,16 +95,21 @@ class OKXLocalStore:
                 retention="7 days"
             )
 
-    def _create_api_client(self) -> OKXAPIClient:
+    def _create_api_client(self) -> APIClientInterface:
         """Create API client with credentials from config or environment."""
-        creds = self.config.get_env_credentials()
-        
-        return OKXAPIClient(
-            api_key=creds['api_key'],
-            api_secret=creds['api_secret'],
-            passphrase=creds['passphrase'],
-            sandbox=self.config.sandbox
-        )
+        try:
+            creds = self.config.get_env_credentials()
+            
+            return OKXAPIClient(
+                api_key=creds['api_key'],
+                api_secret=creds['api_secret'],
+                passphrase=creds['passphrase'],
+                sandbox=self.config.sandbox,
+                rate_limit_per_minute=self.config.rate_limit_per_minute
+            )
+        except Exception as e:
+            logger.error(f"Failed to create API client: {e}")
+            raise ConfigurationError(f"API client creation failed: {e}")
 
     def start(self):
         """Start the local store with automatic syncing."""

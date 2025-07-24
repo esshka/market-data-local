@@ -246,3 +246,6 @@ Dockerfile.*
 
 # Uncomment if using pipenv
 # Pipfile.lock
+
+.claude/
+CLAUDE.md

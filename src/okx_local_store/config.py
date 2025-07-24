@@ -6,9 +6,14 @@ from pathlib import Path
 import json
 import os
 
+from .interfaces.config import ConfigurationProviderInterface, InstrumentConfigInterface
+from .utils.validation import ConfigValidator
+from .utils.timeframes import get_supported_timeframes
+from .exceptions import ConfigurationError
+
 
 @dataclass
-class InstrumentConfig:
+class InstrumentConfig(InstrumentConfigInterface):
     """Configuration for a specific instrument."""
     symbol: str
     timeframes: List[str] = field(default_factory=lambda: ['1m', '5m', '1h', '1d'])
@@ -18,7 +23,7 @@ class InstrumentConfig:
 
 
 @dataclass
-class OKXConfig:
+class OKXConfig(ConfigurationProviderInterface):
     """Main configuration for OKX Local Store."""
     
     # Data storage
@@ -59,8 +64,17 @@ class OKXConfig:
             config.save_to_file(config_path)
             return config
             
-        with open(config_path, 'r') as f:
-            data = json.load(f)
+        try:
+            with open(config_path, 'r') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            raise ConfigurationError(f"Failed to load configuration from {config_path}: {e}")
+        
+        # Validate configuration data
+        try:
+            ConfigValidator.validate_and_raise(data)
+        except Exception as e:
+            raise ConfigurationError(f"Configuration validation failed: {e}")
         
         # Convert instruments
         instruments = []
@@ -72,20 +86,27 @@ class OKXConfig:
 
     def save_to_file(self, config_path: Path) -> None:
         """Save configuration to JSON file."""
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Convert to serializable format
-        data = {}
-        for key, value in self.__dict__.items():
-            if isinstance(value, Path):
-                data[key] = str(value)
-            elif key == 'instruments':
-                data[key] = [inst.__dict__ for inst in value]
-            else:
-                data[key] = value
-        
-        with open(config_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Convert to serializable format
+            data = {}
+            for key, value in self.__dict__.items():
+                if isinstance(value, Path):
+                    data[key] = str(value)
+                elif key == 'instruments':
+                    data[key] = [inst.__dict__ for inst in value]
+                else:
+                    data[key] = value
+            
+            # Validate before saving
+            ConfigValidator.validate_and_raise(data)
+            
+            with open(config_path, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+        except Exception as e:
+            raise ConfigurationError(f"Failed to save configuration to {config_path}: {e}")
 
     def get_instrument(self, symbol: str) -> Optional[InstrumentConfig]:
         """Get configuration for a specific instrument."""
@@ -96,6 +117,16 @@ class OKXConfig:
 
     def add_instrument(self, symbol: str, timeframes: List[str] = None, **kwargs) -> InstrumentConfig:
         """Add or update instrument configuration."""
+        # Validate symbol
+        if not ConfigValidator.validate_symbol(symbol):
+            raise ConfigurationError(f"Invalid symbol format: {symbol}")
+        
+        # Validate timeframes
+        if timeframes:
+            invalid_tfs = ConfigValidator.validate_timeframes(timeframes)
+            if invalid_tfs:
+                raise ConfigurationError(f"Invalid timeframes: {', '.join(invalid_tfs)}")
+        
         existing = self.get_instrument(symbol)
         if existing:
             if timeframes:
@@ -115,11 +146,7 @@ class OKXConfig:
     @property 
     def available_timeframes(self) -> List[str]:
         """Get all supported OKX timeframes."""
-        return [
-            '1m', '3m', '5m', '15m', '30m',
-            '1H', '2H', '4H', '6H', '12H',
-            '1D', '1W', '1M', '3M'
-        ]
+        return get_supported_timeframes()
 
     def get_env_credentials(self) -> Dict[str, Optional[str]]:
         """Get API credentials from environment variables."""

@@ -7,12 +7,17 @@ from typing import List, Dict, Any, Optional, Tuple
 from loguru import logger
 import pandas as pd
 
+from .interfaces.api_client import APIClientInterface
+from .utils.timeframes import get_timeframe_duration_ms
+from .exceptions import APIError, RateLimitError, ConnectionError
 
-class OKXAPIClient:
+
+class OKXAPIClient(APIClientInterface):
     """CCXT-based client for OKX API operations."""
     
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None, 
-                 passphrase: Optional[str] = None, sandbox: bool = True):
+                 passphrase: Optional[str] = None, sandbox: bool = True, 
+                 rate_limit_per_minute: int = 240):
         """
         Initialize OKX API client.
         
@@ -21,6 +26,7 @@ class OKXAPIClient:
             api_secret: OKX API secret
             passphrase: OKX API passphrase
             sandbox: Use sandbox environment
+            rate_limit_per_minute: Maximum requests per minute
         """
         self.exchange = ccxt.okx({
             'apiKey': api_key,
@@ -34,7 +40,7 @@ class OKXAPIClient:
         self._last_request_time = 0
         self._request_count = 0
         self._rate_limit_window_start = time.time()
-        self._max_requests_per_minute = 240
+        self._max_requests_per_minute = rate_limit_per_minute
 
     def _check_rate_limit(self):
         """Ensure we don't exceed rate limits."""
@@ -53,6 +59,10 @@ class OKXAPIClient:
                 time.sleep(sleep_time)
                 self._request_count = 0
                 self._rate_limit_window_start = time.time()
+            else:
+                # Reset if window has passed
+                self._request_count = 0
+                self._rate_limit_window_start = current_time
         
         self._request_count += 1
 
@@ -66,7 +76,7 @@ class OKXAPIClient:
             return symbols
         except Exception as e:
             logger.error(f"Error fetching available symbols: {e}")
-            return []
+            raise APIError(f"Failed to fetch available symbols: {e}")
 
     def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a trading symbol."""
@@ -80,7 +90,7 @@ class OKXAPIClient:
                 return None
         except Exception as e:
             logger.error(f"Error fetching symbol info for {symbol}: {e}")
-            return None
+            raise APIError(f"Failed to fetch symbol info for {symbol}: {e}")
 
     def fetch_ohlcv(
         self, 
@@ -135,7 +145,7 @@ class OKXAPIClient:
             
         except Exception as e:
             logger.error(f"Error fetching OHLCV data for {symbol} {timeframe}: {e}")
-            return []
+            raise APIError(f"Failed to fetch OHLCV data for {symbol} {timeframe}: {e}")
 
     def fetch_latest_candle(self, symbol: str, timeframe: str) -> Optional[Dict[str, Any]]:
         """Fetch the latest candle for a symbol and timeframe."""
@@ -167,26 +177,8 @@ class OKXAPIClient:
         current_time = start_time
         request_count = 0
         
-        # Calculate timeframe duration in milliseconds
-        tf_to_ms = {
-            '1m': 60 * 1000,
-            '3m': 3 * 60 * 1000,
-            '5m': 5 * 60 * 1000,
-            '15m': 15 * 60 * 1000,
-            '30m': 30 * 60 * 1000,
-            '1h': 60 * 60 * 1000,
-            '1H': 60 * 60 * 1000,
-            '2H': 2 * 60 * 60 * 1000,
-            '4H': 4 * 60 * 60 * 1000,
-            '6H': 6 * 60 * 60 * 1000,
-            '12H': 12 * 60 * 60 * 1000,
-            '1d': 24 * 60 * 60 * 1000,
-            '1D': 24 * 60 * 60 * 1000,
-            '1w': 7 * 24 * 60 * 60 * 1000,
-            '1W': 7 * 24 * 60 * 60 * 1000,
-        }
-        
-        tf_ms = tf_to_ms.get(timeframe, 60 * 1000)  # Default to 1 minute
+        # Get timeframe duration using centralized utility
+        tf_ms = get_timeframe_duration_ms(timeframe)
         
         while current_time < end_time and request_count < max_requests:
             # Calculate how many candles we can fetch in one request
@@ -238,24 +230,7 @@ class OKXAPIClient:
 
     def get_timeframe_duration_ms(self, timeframe: str) -> int:
         """Get the duration of a timeframe in milliseconds."""
-        tf_to_ms = {
-            '1m': 60 * 1000,
-            '3m': 3 * 60 * 1000,
-            '5m': 5 * 60 * 1000,
-            '15m': 15 * 60 * 1000,
-            '30m': 30 * 60 * 1000,
-            '1h': 60 * 60 * 1000,
-            '1H': 60 * 60 * 1000,
-            '2H': 2 * 60 * 60 * 1000,
-            '4H': 4 * 60 * 60 * 1000,
-            '6H': 6 * 60 * 60 * 1000,
-            '12H': 12 * 60 * 60 * 1000,
-            '1d': 24 * 60 * 60 * 1000,
-            '1D': 24 * 60 * 60 * 1000,
-            '1w': 7 * 24 * 60 * 60 * 1000,
-            '1W': 7 * 24 * 60 * 60 * 1000,
-        }
-        return tf_to_ms.get(timeframe, 60 * 1000)
+        return get_timeframe_duration_ms(timeframe)
 
     def test_connection(self) -> bool:
         """Test if the API connection is working."""
@@ -267,7 +242,7 @@ class OKXAPIClient:
             return True
         except Exception as e:
             logger.error(f"OKX API connection test failed: {e}")
-            return False
+            raise ConnectionError(f"API connection test failed: {e}")
 
     def get_exchange_status(self) -> Dict[str, Any]:
         """Get exchange status information."""
@@ -280,8 +255,4 @@ class OKXAPIClient:
             }
         except Exception as e:
             logger.error(f"Error fetching exchange status: {e}")
-            return {
-                'status': 'error',
-                'error': str(e),
-                'updated': datetime.now(timezone.utc)
-            }
+            raise APIError(f"Failed to fetch exchange status: {e}")
