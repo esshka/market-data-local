@@ -67,12 +67,12 @@ Implementation of WebSocket real-time data streaming for OKX Local Store.
 - [x] Add performance tests for real-time data handling
 - [x] Test fallback mechanisms thoroughly
 
-### 3.2 CLI Enhancements
-- [ ] Add WebSocket status to `okx-store status` command
-- [ ] Create WebSocket connection health display
-- [ ] Add CLI options for WebSocket mode configuration
-- [ ] Implement connection testing commands
-- [ ] Add WebSocket performance metrics display
+### 3.2 CLI Enhancements ✅
+- [x] Add WebSocket status to `okx-store status` command
+- [x] Create WebSocket connection health display
+- [x] Add CLI options for WebSocket mode configuration
+- [x] Implement connection testing commands
+- [x] Add WebSocket performance metrics display
 
 ### 3.3 Documentation and Examples
 - [ ] Update README.md with WebSocket usage examples
