@@ -176,6 +176,111 @@ def monitoring_example():
         store.stop()
 
 
+def websocket_example():
+    """WebSocket real-time streaming example."""
+    print("\n=== OKX Local Store - WebSocket Real-time Example ===\n")
+    
+    # Configuration for WebSocket real-time streaming
+    config = {
+        "data_dir": "data",
+        "realtime_mode": "hybrid",           # WebSocket + REST fallback
+        "enable_websocket": True,
+        "websocket_fallback_enabled": True,
+        "websocket_config": {
+            "max_reconnect_attempts": 5,
+            "heartbeat_interval": 30,
+            "connection_timeout": 10
+        },
+        "instruments": [
+            {
+                "symbol": "BTC-USDT",
+                "timeframes": ["1m", "1h"],
+                "sync_interval_seconds": 30,
+                "enabled": True,
+                "realtime_source": "websocket",     # Force WebSocket
+                "websocket_priority": True
+            },
+            {
+                "symbol": "ETH-USDT", 
+                "timeframes": ["1m", "1h"],
+                "sync_interval_seconds": 60,
+                "enabled": True,
+                "realtime_source": "auto",          # Auto-select best method
+                "websocket_priority": True
+            }
+        ]
+    }
+    
+    from okx_local_store import OKXLocalStore
+    store = OKXLocalStore(config=config)
+    
+    try:
+        print("Starting store with WebSocket real-time streaming...")
+        store.start()
+        
+        # Wait a moment for WebSocket connection
+        time.sleep(5)
+        
+        # Check WebSocket status
+        print("\nWebSocket Connection Status:")
+        status = store.get_status()
+        
+        # Display overall status
+        sync_status = status.get('sync_engine', {})
+        print(f"  - Sync engine running: {sync_status.get('is_running', False)}")
+        print(f"  - Realtime mode: {status.get('config', {}).get('realtime_mode', 'unknown')}")
+        
+        # Display WebSocket-specific status if available
+        if 'websocket' in status:
+            ws_status = status['websocket']
+            print(f"  - WebSocket connected: {ws_status.get('connected', False)}")
+            print(f"  - Active subscriptions: {ws_status.get('subscriptions', 0)}")
+            print(f"  - Connection age: {ws_status.get('connection_age_seconds', 0)}s")
+        
+        # Display per-symbol real-time status
+        print("\nPer-Symbol Status:")
+        for symbol in ['BTC-USDT', 'ETH-USDT']:
+            try:
+                latest = store.query.get_latest_candle(symbol, '1m')
+                if latest is not None:
+                    # Calculate data age
+                    data_age = (datetime.now() - pd.to_datetime(latest.name)).total_seconds()
+                    status_emoji = "🟢" if data_age < 60 else "🟡" if data_age < 300 else "🔴"
+                    print(f"  {status_emoji} {symbol}: ${latest['close']:.2f} ({data_age:.1f}s ago)")
+                else:
+                    print(f"  ⚪ {symbol}: No data available yet")
+            except Exception as e:
+                print(f"  🔴 {symbol}: Error - {e}")
+        
+        # Demonstrate real-time data monitoring
+        print("\nReal-time Data Monitoring (30 seconds):")
+        print("Watching for data updates...")
+        
+        for i in range(6):  # Monitor for 30 seconds (6 x 5 second intervals)
+            time.sleep(5)
+            
+            print(f"\nUpdate {i+1}/6:")
+            for symbol in ['BTC-USDT', 'ETH-USDT']:
+                try:
+                    latest = store.query.get_latest_candle(symbol, '1m')
+                    if latest is not None:
+                        data_age = (datetime.now() - pd.to_datetime(latest.name)).total_seconds()
+                        source_indicator = "📡" if data_age < 5 else "📊"  # WebSocket vs REST
+                        print(f"  {source_indicator} {symbol}: ${latest['close']:.2f} ({data_age:.1f}s)")
+                except Exception as e:
+                    print(f"  ❌ {symbol}: {e}")
+        
+        print("\nReal-time monitoring complete!")
+        print("💡 Tip: Use 'okx-store websocket status' for detailed WebSocket diagnostics")
+        
+    except Exception as e:
+        print(f"WebSocket example error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        store.stop()
+
+
 if __name__ == "__main__":
     print("OKX Local Store - Example Usage\n")
     
@@ -184,6 +289,7 @@ if __name__ == "__main__":
         basic_example()
         advanced_example()
         monitoring_example()
+        websocket_example()
         
         print("\n=== All examples completed successfully! ===")
         

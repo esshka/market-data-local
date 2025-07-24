@@ -1,7 +1,7 @@
 """Configuration management for OKX Local Store."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal, Any
 from pathlib import Path
 import json
 import os
@@ -13,6 +13,21 @@ from .exceptions import ConfigurationError
 
 
 @dataclass
+class WebSocketConfig:
+    """Configuration for WebSocket connections (isolated from core logic)."""
+    max_reconnect_attempts: int = 5
+    heartbeat_interval: int = 30  # seconds
+    connection_timeout: int = 10  # seconds
+    ping_interval: int = 20  # seconds
+    ping_timeout: int = 60  # seconds
+    max_connection_age: int = 3600  # seconds - reconnect after 1 hour
+    reconnect_delay_base: float = 1.0  # base delay for exponential backoff
+    reconnect_delay_max: float = 60.0  # max delay between reconnection attempts
+    enable_compression: bool = True
+    # Removed complex buffering and batching - simplified WebSocket client doesn't need these
+
+
+@dataclass
 class InstrumentConfig(InstrumentConfigInterface):
     """Configuration for a specific instrument."""
     symbol: str
@@ -20,6 +35,12 @@ class InstrumentConfig(InstrumentConfigInterface):
     sync_interval_seconds: int = 60
     max_history_days: int = 365
     enabled: bool = True
+    
+    # Transport settings (abstracted from WebSocket specifics)
+    realtime_source: Literal["websocket", "polling", "auto"] = "auto"
+    fallback_to_polling: bool = True
+    prefer_realtime: bool = True  # prefer real-time over polling when both available
+    realtime_timeout_seconds: int = 300  # timeout for real-time data before fallback
 
 
 @dataclass
@@ -31,9 +52,6 @@ class OKXConfig(ConfigurationProviderInterface):
     
     # OKX API settings
     sandbox: bool = True
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    passphrase: Optional[str] = None
     
     # Rate limiting
     rate_limit_per_minute: int = 240  # Conservative limit
@@ -46,15 +64,93 @@ class OKXConfig(ConfigurationProviderInterface):
     sync_on_startup: bool = True
     max_concurrent_syncs: int = 3
     
+    # Transport Strategy Configuration (abstracted from implementation details)
+    transport_mode: Literal["polling", "realtime", "hybrid", "auto"] = "hybrid"
+    enable_realtime: bool = True  # Enable real-time features (WebSocket)
+    enable_polling_fallback: bool = True  # Enable polling fallback when real-time fails
+    
+    # Real-time transport settings (WebSocket configuration isolated)
+    websocket_config: WebSocketConfig = field(default_factory=WebSocketConfig)
+    
+    # Backward compatibility (deprecated - use transport_mode instead)
+    realtime_mode: Optional[Literal["websocket", "polling", "hybrid"]] = None
+    enable_websocket: Optional[bool] = None
+    websocket_fallback_enabled: Optional[bool] = None
+    
     # Logging
     log_level: str = "INFO"
     log_file: Optional[Path] = None
 
     def __post_init__(self):
+        # Path conversion
         if isinstance(self.data_dir, str):
             self.data_dir = Path(self.data_dir)
         if self.log_file and isinstance(self.log_file, str):
             self.log_file = Path(self.log_file)
+        
+        # Migrate deprecated configuration to new transport strategy format
+        self._migrate_transport_config()
+    
+    def _migrate_transport_config(self):
+        """Migrate deprecated configuration options to new transport strategy format."""
+        # Handle realtime_mode -> transport_mode migration
+        if self.realtime_mode is not None:
+            mode_mapping = {
+                "websocket": "realtime",
+                "polling": "polling", 
+                "hybrid": "hybrid"
+            }
+            self.transport_mode = mode_mapping.get(self.realtime_mode, "hybrid")
+            self.realtime_mode = None  # Clear deprecated field
+        
+        # Handle enable_websocket -> enable_realtime migration
+        if self.enable_websocket is not None:
+            self.enable_realtime = self.enable_websocket
+            self.enable_websocket = None  # Clear deprecated field
+        
+        # Handle websocket_fallback_enabled -> enable_polling_fallback migration
+        if self.websocket_fallback_enabled is not None:
+            self.enable_polling_fallback = self.websocket_fallback_enabled
+            self.websocket_fallback_enabled = None  # Clear deprecated field
+    
+    def get_transport_strategy_config(self) -> Dict[str, Any]:
+        """Get configuration for transport strategy selection."""
+        return {
+            "transport_mode": self.transport_mode,
+            "enable_realtime": self.enable_realtime,
+            "enable_polling_fallback": self.enable_polling_fallback,
+            "websocket_config": self.websocket_config,
+            "max_concurrent_syncs": self.max_concurrent_syncs
+        }
+    
+    def get_realtime_instruments(self) -> List[InstrumentConfig]:
+        """Get instruments configured for real-time data."""
+        return [
+            inst for inst in self.instruments 
+            if inst.enabled and inst.realtime_source in ["websocket", "auto"]
+        ]
+    
+    def get_polling_instruments(self) -> List[InstrumentConfig]:
+        """Get instruments configured for polling data."""
+        return [
+            inst for inst in self.instruments 
+            if inst.enabled and inst.realtime_source in ["polling", "auto"]
+        ]
+    
+    def should_use_realtime_transport(self) -> bool:
+        """Determine if real-time transport should be used."""
+        return (
+            self.enable_realtime and 
+            self.transport_mode in ["realtime", "hybrid", "auto"] and
+            len(self.get_realtime_instruments()) > 0
+        )
+    
+    def should_use_polling_transport(self) -> bool:
+        """Determine if polling transport should be used."""
+        return (
+            self.transport_mode in ["polling", "hybrid", "auto"] and
+            (len(self.get_polling_instruments()) > 0 or self.enable_polling_fallback)
+        )
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'OKXConfig':
@@ -82,6 +178,10 @@ class OKXConfig(ConfigurationProviderInterface):
             instruments.append(InstrumentConfig(**inst_data))
         data['instruments'] = instruments
         
+        # Convert websocket_config
+        if 'websocket_config' in data and isinstance(data['websocket_config'], dict):
+            data['websocket_config'] = WebSocketConfig(**data['websocket_config'])
+        
         return cls(**data)
 
     def save_to_file(self, config_path: Path) -> None:
@@ -96,6 +196,8 @@ class OKXConfig(ConfigurationProviderInterface):
                     data[key] = str(value)
                 elif key == 'instruments':
                     data[key] = [inst.__dict__ for inst in value]
+                elif key == 'websocket_config':
+                    data[key] = value.__dict__ if hasattr(value, '__dict__') else value
                 else:
                     data[key] = value
             
@@ -148,13 +250,6 @@ class OKXConfig(ConfigurationProviderInterface):
         """Get all supported OKX timeframes."""
         return get_supported_timeframes()
 
-    def get_env_credentials(self) -> Dict[str, Optional[str]]:
-        """Get API credentials from environment variables."""
-        return {
-            'api_key': os.getenv('OKX_API_KEY', self.api_key),
-            'api_secret': os.getenv('OKX_API_SECRET', self.api_secret),
-            'passphrase': os.getenv('OKX_PASSPHRASE', self.passphrase),
-        }
 
 
 def create_default_config() -> OKXConfig:
