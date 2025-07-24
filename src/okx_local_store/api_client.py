@@ -3,7 +3,7 @@
 import ccxt
 import time
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable, AsyncIterator
 from loguru import logger
 import pandas as pd
 
@@ -256,3 +256,56 @@ class OKXAPIClient(APIClientInterface):
         except Exception as e:
             logger.error(f"Error fetching exchange status: {e}")
             raise APIError(f"Failed to fetch exchange status: {e}")
+
+    # WebSocket stub methods (not implemented in REST-only client)
+    async def watch_ohlcv(
+        self, 
+        symbol: str, 
+        timeframe: str, 
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """WebSocket OHLCV streaming not supported in REST-only client."""
+        raise NotImplementedError(
+            "WebSocket functionality not available in REST-only API client. "
+            "Use WebSocketAPIClient or configure realtime_mode='hybrid' for WebSocket support."
+        )
+    
+    async def subscribe_symbol(self, symbol: str, timeframes: List[str]) -> bool:
+        """WebSocket symbol subscription not supported in REST-only client."""
+        raise NotImplementedError(
+            "WebSocket functionality not available in REST-only API client. "
+            "Use WebSocketAPIClient or configure realtime_mode='hybrid' for WebSocket support."
+        )
+    
+    async def unsubscribe_symbol(self, symbol: str, timeframes: Optional[List[str]] = None) -> bool:
+        """WebSocket symbol unsubscription not supported in REST-only client."""
+        raise NotImplementedError(
+            "WebSocket functionality not available in REST-only API client. "
+            "Use WebSocketAPIClient or configure realtime_mode='hybrid' for WebSocket support."
+        )
+    
+    def get_websocket_status(self) -> Dict[str, Any]:
+        """Get WebSocket status (always disconnected for REST-only client)."""
+        return {
+            'connected': False,
+            'client_type': 'REST-only',
+            'message': 'WebSocket not available in REST-only API client'
+        }
+    
+    async def start_websocket(self) -> bool:
+        """WebSocket start not supported in REST-only client."""
+        raise NotImplementedError(
+            "WebSocket functionality not available in REST-only API client. "
+            "Use WebSocketAPIClient or configure realtime_mode='hybrid' for WebSocket support."
+        )
+    
+    async def stop_websocket(self) -> bool:
+        """WebSocket stop not supported in REST-only client."""
+        raise NotImplementedError(
+            "WebSocket functionality not available in REST-only API client. "
+            "Use WebSocketAPIClient or configure realtime_mode='hybrid' for WebSocket support."
+        )
+    
+    def is_websocket_connected(self) -> bool:
+        """WebSocket connection status (always False for REST-only client)."""
+        return False

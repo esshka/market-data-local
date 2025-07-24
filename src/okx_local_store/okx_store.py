@@ -8,8 +8,11 @@ import sys
 
 from .config import OKXConfig, create_default_config
 from .api_client import OKXAPIClient
+from .websocket_api_client import WebSocketAPIClient
 from .storage import OHLCVStorage
+from .realtime_storage import RealtimeOHLCVStorage
 from .sync_engine import SyncEngine
+from .hybrid_sync_engine import HybridSyncEngine
 from .query_interface import OHLCVQueryInterface
 from .interfaces.config import ConfigurationProviderInterface
 from .interfaces.api_client import APIClientInterface
@@ -62,10 +65,10 @@ class OKXLocalStore:
             self._setup_logging()
             
             # Initialize components (with dependency injection support)
-            self.storage = storage or OHLCVStorage(self.config.data_dir)
+            self.storage = storage or self._create_storage()
             self.api_client = api_client or self._create_api_client()
             self.query = query_interface or OHLCVQueryInterface(self.storage, self.config)
-            self.sync_engine = sync_engine or SyncEngine(self.config, self.api_client, self.storage)
+            self.sync_engine = sync_engine or self._create_sync_engine()
             
             logger.info("OKX Local Store initialized")
             
@@ -100,16 +103,85 @@ class OKXLocalStore:
         try:
             creds = self.config.get_env_credentials()
             
-            return OKXAPIClient(
-                api_key=creds['api_key'],
-                api_secret=creds['api_secret'],
-                passphrase=creds['passphrase'],
-                sandbox=self.config.sandbox,
-                rate_limit_per_minute=self.config.rate_limit_per_minute
-            )
+            # Determine which client to create based on configuration
+            realtime_mode = getattr(self.config, 'realtime_mode', 'polling')
+            enable_websocket = getattr(self.config, 'enable_websocket', False)
+            
+            if realtime_mode == 'websocket' and enable_websocket:
+                # Pure WebSocket mode
+                logger.info("Creating WebSocket API client for real-time streaming")
+                websocket_config = getattr(self.config, 'websocket_config', None)
+                return WebSocketAPIClient(
+                    api_key=creds['api_key'],
+                    api_secret=creds['api_secret'],
+                    passphrase=creds['passphrase'],
+                    sandbox=self.config.sandbox,
+                    websocket_config=websocket_config
+                )
+            elif realtime_mode in ['hybrid', 'auto'] and enable_websocket:
+                # Hybrid mode - will be handled by HybridSyncEngine
+                # Create REST client as primary, WebSocket client will be created by HybridSyncEngine
+                logger.info("Creating REST API client for hybrid mode (WebSocket client will be created by sync engine)")
+                return OKXAPIClient(
+                    api_key=creds['api_key'],
+                    api_secret=creds['api_secret'],
+                    passphrase=creds['passphrase'],
+                    sandbox=self.config.sandbox,
+                    rate_limit_per_minute=self.config.rate_limit_per_minute
+                )
+            else:
+                # Pure polling mode (default)
+                logger.info("Creating REST API client for polling mode")
+                return OKXAPIClient(
+                    api_key=creds['api_key'],
+                    api_secret=creds['api_secret'],
+                    passphrase=creds['passphrase'],
+                    sandbox=self.config.sandbox,
+                    rate_limit_per_minute=self.config.rate_limit_per_minute
+                )
         except Exception as e:
             logger.error(f"Failed to create API client: {e}")
             raise ConfigurationError(f"API client creation failed: {e}")
+
+    def _create_storage(self) -> StorageInterface:
+        """Create storage interface based on configuration."""
+        try:
+            enable_websocket = getattr(self.config, 'enable_websocket', False)
+            
+            if enable_websocket:
+                # Use real-time optimized storage for WebSocket operations
+                logger.info("Creating real-time optimized storage for WebSocket mode")
+                return RealtimeOHLCVStorage(self.config.data_dir)
+            else:
+                # Use standard storage for polling mode
+                logger.info("Creating standard storage for polling mode")
+                return OHLCVStorage(self.config.data_dir)
+        except Exception as e:
+            logger.error(f"Failed to create storage: {e}")
+            raise ConfigurationError(f"Storage creation failed: {e}")
+
+    def _create_sync_engine(self) -> SyncEngineInterface:
+        """Create sync engine based on configuration."""
+        try:
+            realtime_mode = getattr(self.config, 'realtime_mode', 'polling')
+            enable_websocket = getattr(self.config, 'enable_websocket', False)
+            
+            if enable_websocket and realtime_mode in ['websocket', 'hybrid', 'auto']:
+                # Use hybrid sync engine for WebSocket functionality
+                logger.info(f"Creating HybridSyncEngine for {realtime_mode} mode")
+                return HybridSyncEngine(
+                    config=self.config,
+                    rest_client=self.api_client if realtime_mode != 'websocket' else None,
+                    storage=self.storage,
+                    websocket_client=self.api_client if realtime_mode == 'websocket' else None
+                )
+            else:
+                # Use standard sync engine for polling mode
+                logger.info("Creating standard SyncEngine for polling mode")
+                return SyncEngine(self.config, self.api_client, self.storage)
+        except Exception as e:
+            logger.error(f"Failed to create sync engine: {e}")
+            raise ConfigurationError(f"Sync engine creation failed: {e}")
 
     def start(self):
         """Start the local store with automatic syncing."""

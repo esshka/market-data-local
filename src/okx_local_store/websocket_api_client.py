@@ -122,12 +122,15 @@ class WebSocketAPIClient(APIClientInterface):
             # Connect to public WebSocket
             logger.info(f"Connecting to WebSocket: {self._ws_url}")
             
-            self._websocket = await websockets.connect(
-                self._ws_url,
-                timeout=self.config.connection_timeout,
-                compression="deflate" if self.config.enable_compression else None,
-                ping_interval=self.config.ping_interval,
-                ping_timeout=self.config.connection_timeout
+            # Use asyncio.wait_for for timeout handling
+            self._websocket = await asyncio.wait_for(
+                websockets.connect(
+                    self._ws_url,
+                    compression="deflate" if self.config.enable_compression else None,
+                    ping_interval=self.config.ping_interval,
+                    ping_timeout=self.config.connection_timeout
+                ),
+                timeout=self.config.connection_timeout
             )
             
             self._is_connected = True
