@@ -122,32 +122,49 @@ class WebSocketAPIClient(APIClientInterface):
             # Connect to public WebSocket
             logger.info(f"Connecting to WebSocket: {self._ws_url}")
             
-            # Use asyncio.wait_for for timeout handling
-            self._websocket = await asyncio.wait_for(
-                websockets.connect(
-                    self._ws_url,
-                    compression="deflate" if self.config.enable_compression else None,
-                    ping_interval=self.config.ping_interval,
-                    ping_timeout=self.config.connection_timeout
-                ),
-                timeout=self.config.connection_timeout
-            )
+            # Use asyncio.wait_for for timeout handling with more robust error handling
+            try:
+                self._websocket = await asyncio.wait_for(
+                    websockets.connect(
+                        self._ws_url,
+                        compression="deflate" if self.config.enable_compression else None,
+                        ping_interval=self.config.ping_interval,
+                        ping_timeout=self.config.connection_timeout,
+                        close_timeout=5.0,
+                        max_size=2**20,  # 1MB max message size
+                        max_queue=32     # Message queue size
+                    ),
+                    timeout=self.config.connection_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"WebSocket connection timeout after {self.config.connection_timeout}s")
+                return False
+            except (ConnectionRefusedError, OSError) as e:
+                logger.error(f"WebSocket connection failed: {e}")
+                return False
             
             self._is_connected = True
             self._reconnect_attempts = 0
             
-            # Start message handler
-            self._message_handler_task = asyncio.create_task(self._handle_messages())
-            
-            # Start ping task
-            self._ping_task = asyncio.create_task(self._ping_loop())
+            # Start message handler with error handling
+            try:
+                self._message_handler_task = asyncio.create_task(self._handle_messages())
+                self._ping_task = asyncio.create_task(self._ping_loop())
+            except Exception as e:
+                logger.error(f"Failed to start WebSocket tasks: {e}")
+                self._is_connected = False
+                if self._websocket:
+                    await self._websocket.close()
+                return False
             
             logger.info("WebSocket connected successfully")
             return True
             
+        except asyncio.CancelledError:
+            logger.info("WebSocket connection was cancelled during startup")
+            return False
         except Exception as e:
             logger.error(f"Failed to start WebSocket: {e}")
-            await self._handle_connection_error()
             return False
     
     async def stop_websocket(self) -> bool:

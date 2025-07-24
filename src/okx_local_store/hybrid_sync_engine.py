@@ -780,6 +780,7 @@ class HybridSyncEngine(SyncEngineInterface):
                 'fallback_instruments': fallback_count,
                 'total_instruments': len(self._instrument_states)
             },
+            'scheduled_jobs': len([s for s in self._instrument_states.values() if s.polling_active]),
             'last_sync_times': self._sync_status.copy(),
             'recent_errors': self._sync_errors.copy()
         }

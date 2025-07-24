@@ -109,7 +109,7 @@ Examples:
     
     # WebSocket test
     ws_test_parser = ws_subparsers.add_parser('test', help='Test WebSocket connection')
-    ws_test_parser.add_argument('--timeout', type=int, default=10, help='Connection timeout in seconds')
+    ws_test_parser.add_argument('--timeout', type=int, default=30, help='Total test timeout in seconds')
     
     # WebSocket config
     ws_config_parser = ws_subparsers.add_parser('config', help='Show WebSocket configuration')
@@ -533,53 +533,40 @@ def cmd_websocket_status(args, store):
 
 
 def cmd_websocket_test(args, store):
-    """Handle websocket test command."""
+    """Handle websocket test command using dedicated WebSocket tester."""
+    import asyncio
+    from .websocket_tester import WebSocketTester, display_test_report
+    
     try:
-        print("Testing WebSocket connection...")
+        # Use timeout from args (already has default from parser)
+        timeout = args.timeout
         
-        # Get current status
-        status = store.get_status()
-        sync_status = status.get('sync_engine', {})
-        ws_status = sync_status.get('websocket_status')
+        print("🔌 Starting WebSocket Tests...")
+        print(f"Timeout: {timeout}s")
+        print("=" * 50)
         
-        if not ws_status:
-            print("❌ WebSocket not available or not configured")
+        # Create dedicated tester (independent of store lifecycle)
+        config = store.config
+        tester = WebSocketTester(config)
+        
+        # Run async tests in sync CLI context
+        try:
+            report = asyncio.run(tester.run_progressive_tests(timeout=timeout))
+            display_test_report(report)
+            return 0 if report.all_passed else 1
+            
+        except KeyboardInterrupt:
+            print("\n🛑 Test cancelled by user")
             return 1
-        
-        # Check connection
-        connected = ws_status.get('connected', False)
-        authenticated = ws_status.get('authenticated', False)
-        
-        print(f"Connection test results:")
-        print(f"  Connected: {'✅ YES' if connected else '❌ NO'}")
-        print(f"  Authenticated: {'✅ YES' if authenticated else '❌ NO'}")
-        
-        if connected:
-            active_subs = ws_status.get('active_subscriptions', 0)
-            total_subs = ws_status.get('total_subscriptions', 0)
-            print(f"  Active subscriptions: {active_subs}/{total_subs}")
             
-            # Test ping if connection is active
-            last_pong = ws_status.get('last_pong_seconds_ago')
-            if last_pong is not None:
-                if last_pong < 30:
-                    print(f"  Ping test: ✅ GOOD ({last_pong:.1f}s ago)")
-                elif last_pong < 60:
-                    print(f"  Ping test: ⚠️ SLOW ({last_pong:.1f}s ago)")
-                else:
-                    print(f"  Ping test: ❌ FAILED ({last_pong:.1f}s ago)")
+        except Exception as e:
+            print(f"\n❌ Test execution failed: {e}")
+            print("This might indicate a configuration or network issue.")
+            return 1
             
-            print("✅ WebSocket connection is healthy")
-        else:
-            reconnect_attempts = ws_status.get('reconnect_attempts', 0)
-            max_attempts = ws_status.get('max_reconnect_attempts', 0)
-            print(f"  Reconnect attempts: {reconnect_attempts}/{max_attempts}")
-            print("❌ WebSocket connection is not working")
-        
-        return 0 if connected else 1
-        
     except Exception as e:
-        print(f"Error testing WebSocket connection: {e}")
+        print(f"❌ Failed to initialize WebSocket test: {e}")
+        print("Check your configuration and try again.")
         return 1
 
 
