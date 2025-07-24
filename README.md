@@ -4,6 +4,7 @@ A Python application for local storage of OHLCV candlestick data from OKX exchan
 
 ## Features
 
+- **Daemon Mode**: Continuous background synchronization for hands-free operation
 - **Multi-instrument support**: Track multiple trading pairs simultaneously
 - **Multiple timeframes**: Support for all OKX timeframes (1m, 5m, 1h, 1d, etc.)
 - **Automatic synchronization**: Keep data fresh with configurable sync intervals
@@ -71,8 +72,159 @@ okx-store add-symbol ETH-USDT --timeframes 1m 1h 1d
 # Export data to CSV
 okx-store export BTC-USDT 1d output.csv --days 30
 
-# Start daemon mode
+# Start daemon mode (recommended for continuous operation)
 okx-store daemon
+
+# Start daemon without initial sync
+okx-store daemon --no-sync-on-start
+```
+
+## Daemon Mode
+
+Daemon mode is the **recommended way** to run OKX Local Store for continuous data synchronization. It runs as a background process, automatically keeping your local data fresh with configurable sync intervals.
+
+### How Daemon Mode Works
+
+- **Continuous Operation**: Runs indefinitely until manually stopped (Ctrl+C)
+- **Scheduled Syncing**: Each trading pair syncs on its own configurable interval
+- **Background Threading**: Uses thread pool for concurrent symbol synchronization
+- **Rate Limit Compliance**: Automatically respects OKX API rate limits
+- **Incremental Updates**: Only fetches new/missing data, not full reloads
+- **Error Recovery**: Handles network issues and API errors gracefully
+- **Gap Detection**: Automatically detects and fills missing data periods
+
+### Starting Daemon Mode
+
+```bash
+# Basic daemon start (performs initial sync)
+okx-store daemon
+
+# Start daemon without initial sync
+okx-store daemon --no-sync-on-start
+
+# Use custom configuration file
+okx-store daemon --config custom-config.json
+```
+
+### Daemon Configuration
+
+Key configuration settings for daemon mode:
+
+```json
+{
+  "enable_auto_sync": true,          // Must be true for daemon mode
+  "sync_on_startup": true,           // Sync all symbols when starting
+  "max_concurrent_syncs": 3,         // Max parallel sync threads
+  "rate_limit_per_minute": 240,      // API request rate limit
+  "instruments": [
+    {
+      "symbol": "BTC-USDT",
+      "timeframes": ["1m", "5m", "1h", "1d"],
+      "sync_interval_seconds": 60,    // Sync every 60 seconds
+      "max_history_days": 365,
+      "enabled": true                 // Must be true to sync
+    }
+  ]
+}
+```
+
+### Per-Symbol Sync Intervals
+
+Each symbol can have its own sync frequency:
+
+```json
+{
+  "instruments": [
+    {
+      "symbol": "BTC-USDT",
+      "sync_interval_seconds": 30    // High-frequency trading pair
+    },
+    {
+      "symbol": "ETH-USDT", 
+      "sync_interval_seconds": 60    // Medium frequency
+    },
+    {
+      "symbol": "DOT-USDT",
+      "sync_interval_seconds": 300   // Lower frequency (5 minutes)
+    }
+  ]
+}
+```
+
+### Daemon Benefits
+
+**vs Manual Sync Commands:**
+- ✅ **Always Fresh Data**: Continuous updates without manual intervention
+- ✅ **Efficient**: Only fetches new data since last sync
+- ✅ **Reliable**: Automatic error recovery and retry logic
+- ✅ **Optimized**: Concurrent syncing with rate limit compliance
+- ✅ **Hands-Free**: Set it and forget it operation
+
+**Production Use Cases:**
+- Trading bots requiring real-time data
+- Analytics dashboards needing fresh market data
+- Research applications with continuous data requirements
+- Backup/archival systems for historical data
+
+### Monitoring Daemon
+
+While daemon is running, use these commands in another terminal:
+
+```bash
+# Check sync status
+okx-store status
+
+# Monitor recent data
+okx-store query BTC-USDT 1m --count 5
+
+# Force immediate sync if needed
+okx-store sync BTC-USDT
+```
+
+### Daemon Lifecycle
+
+```bash
+# Start daemon (blocks terminal)
+okx-store daemon
+
+# Stop daemon: Ctrl+C
+# - Gracefully stops all sync threads
+# - Closes database connections
+# - Cleans up resources
+```
+
+### Performance Tuning
+
+For optimal daemon performance:
+
+```json
+{
+  "max_concurrent_syncs": 3,        // Adjust based on your hardware
+  "rate_limit_per_minute": 200,     // Conservative rate limiting
+  "instruments": [
+    {
+      "sync_interval_seconds": 60,  // Balance freshness vs API usage
+      "max_history_days": 90       // Limit backfill scope
+    }
+  ]
+}
+```
+
+### Troubleshooting Daemon
+
+**Common Issues:**
+
+- **Daemon won't start**: Check `enable_auto_sync: true` in config
+- **High API usage**: Increase `sync_interval_seconds` for less critical pairs
+- **Memory usage**: Reduce `max_concurrent_syncs` or number of timeframes
+- **Missing data**: Check logs for sync errors and API connectivity
+
+**Logging:**
+```json
+{
+  "log_level": "DEBUG",           // For detailed troubleshooting
+  "log_file": "okx-store.log"     // Persistent logging
+}
 ```
 
 ## Configuration
@@ -96,17 +248,17 @@ The app uses a JSON configuration file (default: `~/.okx_local_store/config.json
   "data_dir": "data",
   "sandbox": false,
   "rate_limit_per_minute": 240,
-  "enable_auto_sync": true,
-  "sync_on_startup": true,
-  "max_concurrent_syncs": 3,
+  "enable_auto_sync": true,           // Required for daemon mode
+  "sync_on_startup": true,            // Sync all symbols when daemon starts
+  "max_concurrent_syncs": 3,          // Daemon threading setting
   "log_level": "INFO",
   "instruments": [
     {
       "symbol": "BTC-USDT",
       "timeframes": ["1m", "5m", "1h", "1d"],
-      "sync_interval_seconds": 60,
+      "sync_interval_seconds": 60,    // How often daemon syncs this symbol
       "max_history_days": 365,
-      "enabled": true
+      "enabled": true                 // Must be true for daemon to sync
     }
   ]
 }
