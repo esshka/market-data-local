@@ -43,12 +43,12 @@ Implementation of WebSocket real-time data streaming for OKX Local Store.
 - [x] Add intelligent connection management
 - [x] Implement data source prioritization logic
 
-### 2.2 Storage Optimizations
-- [ ] Enhance `OHLCVStorage` for real-time data ingestion
-- [ ] Add batched write operations for WebSocket streams
-- [ ] Implement data deduplication for overlapping sources
-- [ ] Add data source tracking (WebSocket vs REST)
-- [ ] Optimize database writes for high-frequency updates
+### 2.2 Storage Optimizations ✅
+- [x] Enhance `OHLCVStorage` for real-time data ingestion
+- [x] Add batched write operations for WebSocket streams
+- [x] Implement data deduplication for overlapping sources
+- [x] Add data source tracking (WebSocket vs REST)
+- [x] Optimize database writes for high-frequency updates
 
 ### 2.3 Error Handling and Recovery
 - [ ] Implement WebSocket connection failure detection
