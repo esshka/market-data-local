@@ -570,6 +570,54 @@ def cmd_websocket_test(args, store):
         return 1
 
 
+def cmd_websocket_status_standalone(args, store):
+    """Handle websocket status command without starting the full store."""
+    try:
+        print("WebSocket Configuration Status")
+        print("=" * 35)
+        
+        config = store.config
+        
+        print(f"Realtime mode: {config.realtime_mode}")
+        print(f"WebSocket enabled: {config.enable_websocket}")
+        print(f"Fallback enabled: {config.websocket_fallback_enabled}")
+        
+        # WebSocket connection settings
+        ws_config = config.websocket_config
+        print(f"\nConnection Settings:")
+        print(f"  Max reconnect attempts: {ws_config.max_reconnect_attempts}")
+        print(f"  Connection timeout: {ws_config.connection_timeout}s")
+        print(f"  Heartbeat interval: {ws_config.heartbeat_interval}s")
+        print(f"  Ping interval: {ws_config.ping_interval}s")
+        print(f"  Max connection age: {ws_config.max_connection_age}s")
+        print(f"  Reconnect delay: {ws_config.reconnect_delay_base}s - {ws_config.reconnect_delay_max}s")
+        print(f"  Compression enabled: {ws_config.enable_compression}")
+        print(f"  Buffer size: {ws_config.buffer_size}")
+        
+        # Configured instruments
+        print(f"\nConfigured Instruments ({len(config.instruments)}):")
+        for instrument in config.instruments:
+            if instrument.enabled:
+                realtime_source = getattr(instrument, 'realtime_source', 'auto')
+                fallback_enabled = getattr(instrument, 'fallback_to_polling', True)
+                ws_priority = getattr(instrument, 'websocket_priority', True)
+                
+                print(f"  {instrument.symbol}:")
+                print(f"    Timeframes: {', '.join(instrument.timeframes)}")  
+                print(f"    Realtime source: {realtime_source}")
+                print(f"    Fallback to polling: {fallback_enabled}")
+                print(f"    WebSocket priority: {ws_priority}")
+        
+        print(f"\n💡 Note: To see live connection status, use daemon mode:")
+        print(f"   okx-store --config {args.config or 'default'} daemon")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error showing WebSocket config: {e}")
+        return 1
+
+
 def cmd_websocket_config(args, store):
     """Handle websocket config command."""
     try:
@@ -651,9 +699,12 @@ def main():
             elif args.command == 'list':
                 return cmd_list(args, store) or 0
         
-        # Handle websocket test independently (doesn't need store started)
-        if args.command == 'websocket' and args.ws_command == 'test':
-            return cmd_websocket_test(args, store) or 0
+        # Handle websocket commands independently (don't need store started)
+        if args.command == 'websocket' and args.ws_command in ['test', 'status']:
+            if args.ws_command == 'test':
+                return cmd_websocket_test(args, store) or 0
+            elif args.ws_command == 'status':
+                return cmd_websocket_status_standalone(args, store) or 0
         
         # Commands that need the store started
         if args.command == 'daemon':
