@@ -191,12 +191,19 @@ class HybridSyncEngine(SyncEngineInterface):
         self._is_running = False
         
         # Stop async operations
-        if self._loop and self._websocket_task:
-            asyncio.run_coroutine_threadsafe(self._stop_async_operations(), self._loop)
+        if self._loop and not self._loop.is_closed():
+            try:
+                # Schedule the stop operation and wait for it
+                future = asyncio.run_coroutine_threadsafe(self._stop_async_operations(), self._loop)
+                future.result(timeout=3.0)  # Wait up to 3 seconds for graceful shutdown
+            except Exception as e:
+                logger.warning(f"Error during async shutdown: {e}")
         
         # Wait for sync thread to finish
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=5)
+            if self._sync_thread.is_alive():
+                logger.warning("Sync thread did not stop gracefully")
         
         # Shutdown polling executor
         self._polling_executor.shutdown(wait=True)
@@ -246,10 +253,24 @@ class HybridSyncEngine(SyncEngineInterface):
             # Run event loop
             self._loop.run_until_complete(self._websocket_task)
             
+        except asyncio.CancelledError:
+            logger.info("Async operations cancelled during shutdown")
         except Exception as e:
             logger.error(f"Error in async operations: {e}")
         finally:
-            if self._loop:
+            if self._loop and not self._loop.is_closed():
+                # Cancel any pending tasks before closing the loop
+                pending = asyncio.all_tasks(self._loop)
+                for task in pending:
+                    task.cancel()
+                
+                # Wait for tasks to complete cancellation
+                if pending:
+                    try:
+                        self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    except Exception:
+                        pass  # Ignore exceptions during cleanup
+                
                 self._loop.close()
     
     async def _websocket_manager(self):
@@ -271,9 +292,15 @@ class HybridSyncEngine(SyncEngineInterface):
             
             # Monitor connections and handle reconnections
             while self._is_running and not self._stop_event.is_set():
-                await self._monitor_websocket_health()
-                await asyncio.sleep(10)  # Check every 10 seconds
-                
+                try:
+                    await self._monitor_websocket_health()
+                    await asyncio.sleep(10)  # Check every 10 seconds
+                except asyncio.CancelledError:
+                    logger.info("WebSocket manager cancelled during shutdown")
+                    break
+                    
+        except asyncio.CancelledError:
+            logger.info("WebSocket manager task cancelled")
         except Exception as e:
             logger.error(f"Error in WebSocket manager: {e}")
             await self._handle_websocket_failure()
@@ -433,10 +460,17 @@ class HybridSyncEngine(SyncEngineInterface):
             if self.websocket_client:
                 await self.websocket_client.stop_websocket()
                 
-            # Cancel WebSocket task
+            # Cancel WebSocket task and wait for it to complete
             if self._websocket_task and not self._websocket_task.done():
                 self._websocket_task.cancel()
+                try:
+                    await asyncio.wait_for(self._websocket_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    # Expected when cancelling or timing out
+                    pass
                 
+        except asyncio.CancelledError:
+            logger.info("Stop operations cancelled")
         except Exception as e:
             logger.error(f"Error stopping async operations: {e}")
     

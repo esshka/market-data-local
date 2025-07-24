@@ -249,3 +249,6 @@ Dockerfile.*
 
 .claude/
 CLAUDE.md
+
+todos/
+todo.md
