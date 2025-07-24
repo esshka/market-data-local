@@ -651,6 +651,10 @@ def main():
             elif args.command == 'list':
                 return cmd_list(args, store) or 0
         
+        # Handle websocket test independently (doesn't need store started)
+        if args.command == 'websocket' and args.ws_command == 'test':
+            return cmd_websocket_test(args, store) or 0
+        
         # Commands that need the store started
         if args.command == 'daemon':
             return cmd_daemon(args, store) or 0

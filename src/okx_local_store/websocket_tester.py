@@ -268,7 +268,7 @@ class WebSocketTester:
         start_time = time.time()
         
         try:
-            logger.info(f"Testing subscription to {symbol} market data")
+            logger.info(f"Testing subscription to {symbol} ticker data")
             
             # Connect to WebSocket
             websocket = await asyncio.wait_for(
@@ -277,11 +277,11 @@ class WebSocketTester:
             )
             
             try:
-                # Subscribe to candle data
+                # Subscribe to ticker data (using verified OKX format)
                 subscribe_msg = {
                     "op": "subscribe",
                     "args": [{
-                        "channel": "candle1m",
+                        "channel": "tickers",
                         "instId": symbol
                     }]
                 }
@@ -297,24 +297,26 @@ class WebSocketTester:
                 response_data = json.loads(response)
                 
                 # Check if subscription was successful
-                if response_data.get("event") == "subscribe" and response_data.get("code") == "0":
+                # Success: {"event": "subscribe", "arg": {...}} (no error code)
+                # Error: {"event": "error", "code": "...", "msg": "..."}
+                if response_data.get("event") == "subscribe" and "code" not in response_data:
                     duration = time.time() - start_time
                     
                     return TestResult(
-                        name="Market Data Subscription",
+                        name="Ticker Data Subscription",
                         status=TestStatus.PASSED,
                         duration=duration,
-                        message=f"Successfully subscribed to {symbol} market data",
+                        message=f"Successfully subscribed to {symbol} ticker data",
                         details={
                             "symbol": symbol,
-                            "channel": "candle1m",
+                            "channel": "tickers",
                             "response": response_data
                         }
                     )
                 else:
                     duration = time.time() - start_time
                     return TestResult(
-                        name="Market Data Subscription",
+                        name="Ticker Data Subscription",
                         status=TestStatus.FAILED,
                         duration=duration,
                         message=f"Subscription failed: {response_data}",
@@ -382,8 +384,8 @@ class WebSocketTester:
             
             # Only continue if ping/pong passed
             if ping_result.status == TestStatus.PASSED:
-                # Test 3: Market data subscription
-                logger.info("📊 Starting market data subscription test...")
+                # Test 3: Ticker data subscription
+                logger.info("📊 Starting ticker data subscription test...")
                 subscription_result = await self.test_subscription(timeout=timeout//3)
                 results.append(subscription_result)
         
