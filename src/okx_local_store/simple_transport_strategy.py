@@ -28,7 +28,7 @@ class TransportStrategy(ABC):
     """Abstract base class for transport strategies."""
     
     @abstractmethod
-    def create_components(self, config: OKXConfig, credentials: Dict[str, str]) -> Dict[str, Any]:
+    def create_components(self, config: OKXConfig) -> Dict[str, Any]:
         """Create all necessary components for this transport strategy."""
         pass
     
@@ -41,15 +41,12 @@ class TransportStrategy(ABC):
 class PollingTransportStrategy(TransportStrategy):
     """Strategy for REST API polling only."""
     
-    def create_components(self, config: OKXConfig, credentials: Dict[str, str]) -> Dict[str, Any]:
+    def create_components(self, config: OKXConfig) -> Dict[str, Any]:
         """Create components for polling-only transport."""
         logger.info("Creating components for polling-only transport")
         
         # Create REST client
         rest_client = OKXAPIClient(
-            api_key=credentials['api_key'],
-            api_secret=credentials['api_secret'],
-            passphrase=credentials['passphrase'],
             sandbox=config.sandbox,
             rate_limit_per_minute=config.rate_limit_per_minute
         )
@@ -79,7 +76,7 @@ class PollingTransportStrategy(TransportStrategy):
 class RealtimeTransportStrategy(TransportStrategy):
     """Strategy for WebSocket real-time only."""
     
-    def create_components(self, config: OKXConfig, credentials: Dict[str, str]) -> Dict[str, Any]:
+    def create_components(self, config: OKXConfig) -> Dict[str, Any]:
         """Create components for real-time-only transport."""
         logger.info("Creating components for real-time-only transport")
         
@@ -115,15 +112,12 @@ class RealtimeTransportStrategy(TransportStrategy):
 class HybridTransportStrategy(TransportStrategy):
     """Strategy for hybrid WebSocket + REST polling."""
     
-    def create_components(self, config: OKXConfig, credentials: Dict[str, str]) -> Dict[str, Any]:
+    def create_components(self, config: OKXConfig) -> Dict[str, Any]:
         """Create components for hybrid transport."""
         logger.info("Creating components for hybrid transport (WebSocket + REST polling)")
         
         # Create REST client for polling and historical data
         rest_client = OKXAPIClient(
-            api_key=credentials['api_key'],
-            api_secret=credentials['api_secret'],
-            passphrase=credentials['passphrase'],
             sandbox=config.sandbox,
             rate_limit_per_minute=config.rate_limit_per_minute
         )
@@ -172,8 +166,7 @@ class SimpleTransportStrategyFactory:
     
     def create_transport_components(
         self, 
-        config: OKXConfig, 
-        credentials: Dict[str, str]
+        config: OKXConfig
     ) -> Dict[str, Any]:
         """Create transport components based on configuration."""
         try:
@@ -184,7 +177,7 @@ class SimpleTransportStrategyFactory:
             strategy = self._strategies[transport_mode]
             
             # Create components using strategy
-            components = strategy.create_components(config, credentials)
+            components = strategy.create_components(config)
             
             # Add metadata
             components['strategy_description'] = strategy.get_description()
@@ -216,16 +209,15 @@ class SimpleTransportStrategyFactory:
             return TransportMode.HYBRID
 
 
-def create_transport_components(config: OKXConfig, credentials: Dict[str, str]) -> Dict[str, Any]:
+def create_transport_components(config: OKXConfig) -> Dict[str, Any]:
     """
     Create transport components using the factory.
     
     Args:
         config: OKX configuration
-        credentials: API credentials
         
     Returns:
         Dictionary with transport components
     """
     factory = SimpleTransportStrategyFactory()
-    return factory.create_transport_components(config, credentials)
+    return factory.create_transport_components(config)

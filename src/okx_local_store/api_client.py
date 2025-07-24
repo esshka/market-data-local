@@ -15,23 +15,15 @@ from .exceptions import APIError, RateLimitError, ConnectionError
 class OKXAPIClient(APIClientInterface):
     """CCXT-based client for OKX API operations."""
     
-    def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None, 
-                 passphrase: Optional[str] = None, sandbox: bool = True, 
-                 rate_limit_per_minute: int = 240):
+    def __init__(self, sandbox: bool = True, rate_limit_per_minute: int = 240):
         """
-        Initialize OKX API client.
+        Initialize OKX API client for public endpoints only.
         
         Args:
-            api_key: OKX API key (optional for public endpoints)
-            api_secret: OKX API secret
-            passphrase: OKX API passphrase
             sandbox: Use sandbox environment
             rate_limit_per_minute: Maximum requests per minute
         """
         self.exchange = ccxt.okx({
-            'apiKey': api_key,
-            'secret': api_secret,
-            'password': passphrase,
             'sandbox': sandbox,
             'rateLimit': 250,  # Milliseconds between requests
             'enableRateLimit': True,

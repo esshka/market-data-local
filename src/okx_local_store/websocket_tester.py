@@ -12,7 +12,7 @@ from loguru import logger
 
 from .config import OKXConfig, WebSocketConfig
 from .exceptions import (
-    WebSocketError, WebSocketConnectionError, WebSocketAuthenticationError,
+    WebSocketError, WebSocketConnectionError,
     WebSocketTimeoutError
 )
 
@@ -80,16 +80,9 @@ class WebSocketTester:
         sandbox = getattr(config, 'sandbox', True)
         if sandbox:
             self.ws_url = "wss://wspap.okx.com:8443/ws/v5/public"
-            self.ws_private_url = "wss://wspap.okx.com:8443/ws/v5/private"
         else:
             self.ws_url = "wss://ws.okx.com:8443/ws/v5/public"
-            self.ws_private_url = "wss://ws.okx.com:8443/ws/v5/private"
         
-        # Get credentials
-        creds = config.get_env_credentials()
-        self.api_key = creds.get('api_key')
-        self.api_secret = creds.get('api_secret')
-        self.passphrase = creds.get('passphrase')
     
     async def test_basic_connectivity(self, timeout: int = 10) -> TestResult:
         """

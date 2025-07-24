@@ -54,9 +54,6 @@ class MockWebSocketClient(APIClientInterface):
     
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        api_secret: Optional[str] = None,
-        passphrase: Optional[str] = None,
         sandbox: bool = True,
         websocket_config: Optional[WebSocketConfig] = None,
         simulate_failures: bool = False,
@@ -69,15 +66,11 @@ class MockWebSocketClient(APIClientInterface):
             simulate_failures: Whether to simulate connection failures
             failure_rate: Probability of simulated failures (0.0-1.0)
         """
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.passphrase = passphrase
         self.sandbox = sandbox
         self.config = websocket_config or WebSocketConfig()
         
         # Mock state
         self._is_connected = False
-        self._is_authenticated = False
         self._subscriptions: Dict[str, MockSubscription] = {}
         self._connection_start_time: Optional[float] = None
         self._reconnect_attempts = 0
@@ -125,7 +118,6 @@ class MockWebSocketClient(APIClientInterface):
         await asyncio.sleep(0.1)
         
         self._is_connected = True
-        self._is_authenticated = bool(self.api_key)
         self._connection_start_time = time.time()
         self._reconnect_attempts = 0
         self._stop_generation = False
@@ -138,7 +130,6 @@ class MockWebSocketClient(APIClientInterface):
     async def stop_websocket(self) -> bool:
         """Stop mock WebSocket connection."""
         self._is_connected = False
-        self._is_authenticated = False
         self._stop_generation = True
         
         # Stop all data generators
@@ -330,7 +321,7 @@ class MockWebSocketClient(APIClientInterface):
         
         return {
             "connected": self._is_connected,
-            "authenticated": self._is_authenticated,
+            "authenticated": True,  # Always authenticated for public endpoints
             "reconnect_attempts": self._reconnect_attempts,
             "max_reconnect_attempts": self.config.max_reconnect_attempts,
             "connection_age_seconds": connection_age,

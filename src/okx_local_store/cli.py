@@ -167,7 +167,6 @@ def cmd_status(args, store):
             ws_status = sync['websocket_status']
             print(f"\nWebSocket Status:")
             print(f"  Connected: {'✓' if ws_status.get('connected') else '✗'}")
-            print(f"  Authenticated: {'✓' if ws_status.get('authenticated') else '✗'}")
             
             if ws_status.get('connection_age_seconds'):
                 age_minutes = ws_status['connection_age_seconds'] / 60
@@ -444,7 +443,6 @@ def cmd_websocket_status(args, store):
             if ws_status:
                 print(f"\nConnection Details:")
                 print(f"  Status: {'🟢 Connected' if ws_status.get('connected') else '🔴 Disconnected'}")
-                print(f"  Authenticated: {'✓' if ws_status.get('authenticated') else '✗'}")
                 print(f"  WebSocket URL: {ws_status.get('websocket_url', 'N/A')}")
                 
                 if ws_status.get('connection_age_seconds'):

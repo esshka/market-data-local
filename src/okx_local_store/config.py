@@ -52,9 +52,6 @@ class OKXConfig(ConfigurationProviderInterface):
     
     # OKX API settings
     sandbox: bool = True
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    passphrase: Optional[str] = None
     
     # Rate limiting
     rate_limit_per_minute: int = 240  # Conservative limit
@@ -253,13 +250,6 @@ class OKXConfig(ConfigurationProviderInterface):
         """Get all supported OKX timeframes."""
         return get_supported_timeframes()
 
-    def get_env_credentials(self) -> Dict[str, Optional[str]]:
-        """Get API credentials from environment variables."""
-        return {
-            'api_key': os.getenv('OKX_API_KEY', self.api_key),
-            'api_secret': os.getenv('OKX_API_SECRET', self.api_secret),
-            'passphrase': os.getenv('OKX_PASSPHRASE', self.passphrase),
-        }
 
 
 def create_default_config() -> OKXConfig:

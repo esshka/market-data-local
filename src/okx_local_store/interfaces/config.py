@@ -24,9 +24,6 @@ class ConfigurationProviderInterface(ABC):
     # rather than abstract properties
     data_dir: Path
     sandbox: bool
-    api_key: Optional[str]
-    api_secret: Optional[str]
-    passphrase: Optional[str]
     rate_limit_per_minute: int
     instruments: List[InstrumentConfigInterface]
     enable_auto_sync: bool
@@ -45,10 +42,6 @@ class ConfigurationProviderInterface(ABC):
         """Add or update instrument configuration."""
         pass
     
-    @abstractmethod
-    def get_env_credentials(self) -> Dict[str, Optional[str]]:
-        """Get API credentials from environment variables."""
-        pass
     
     @abstractmethod
     def save_to_file(self, config_path: Path) -> None:

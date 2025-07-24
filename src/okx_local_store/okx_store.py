@@ -106,10 +106,8 @@ class OKXLocalStore:
     def _create_transport_components(self) -> Dict[str, Any]:
         """Create transport components using strategy pattern."""
         try:
-            creds = self.config.get_env_credentials()
-            
             # Use transport strategy factory for clean component creation
-            components = create_transport_components(self.config, creds)
+            components = create_transport_components(self.config)
             
             logger.info(f"Transport components created: {components['strategy_description']}")
             return components
@@ -145,25 +143,18 @@ class OKXLocalStore:
             from .api_client import OKXAPIClient
             from .websocket_api_client import WebSocketAPIClient
             
-            creds = self.config.get_env_credentials()
             realtime_mode = getattr(self.config, 'realtime_mode', 'polling')
             enable_websocket = getattr(self.config, 'enable_websocket', False)
             
             if realtime_mode == 'websocket' and enable_websocket:
                 logger.info("Creating WebSocket API client for real-time streaming")
                 return WebSocketAPIClient(
-                    api_key=creds['api_key'],
-                    api_secret=creds['api_secret'],
-                    passphrase=creds['passphrase'],
                     sandbox=self.config.sandbox,
                     websocket_config=getattr(self.config, 'websocket_config', None)
                 )
             else:
                 logger.info("Creating REST API client")
                 return OKXAPIClient(
-                    api_key=creds['api_key'],
-                    api_secret=creds['api_secret'],
-                    passphrase=creds['passphrase'],
                     sandbox=self.config.sandbox,
                     rate_limit_per_minute=self.config.rate_limit_per_minute
                 )
