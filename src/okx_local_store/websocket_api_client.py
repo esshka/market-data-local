@@ -266,14 +266,11 @@ class WebSocketAPIClient(APIClientInterface):
             channel = arg.get("channel", "")
             inst_id = arg.get("instId", "")
             
-            if channel.startswith("candle"):
-                # Extract timeframe from channel (e.g., "candle1m" -> "1m")
-                timeframe = channel.replace("candle", "")
-                
-                # Process candle data
-                candles = data.get("data", [])
-                for candle_data in candles:
-                    await self._process_candle_data(inst_id, timeframe, candle_data)
+            if channel == "tickers":
+                # Handle ticker data
+                tickers = data.get("data", [])
+                for ticker_data in tickers:
+                    await self._process_ticker_data(inst_id, ticker_data)
                     
         except Exception as e:
             logger.error(f"Error handling data message: {e}")
@@ -318,6 +315,44 @@ class WebSocketAPIClient(APIClientInterface):
                 
         except Exception as e:
             logger.error(f"Error processing candle data: {e}")
+    
+    async def _process_ticker_data(self, symbol: str, ticker_data: Dict):
+        """Process individual ticker data."""
+        try:
+            # Convert ticker to OHLCV format for compatibility
+            # This is a simplified conversion - real implementation would need more logic
+            normalized_data = {
+                "timestamp": int(ticker_data.get("ts", 0)),
+                "open": float(ticker_data.get("open24h", 0)),
+                "high": float(ticker_data.get("high24h", 0)),
+                "low": float(ticker_data.get("low24h", 0)),
+                "close": float(ticker_data.get("last", 0)),
+                "volume": float(ticker_data.get("vol24h", 0)),
+                "vol_currency": float(ticker_data.get("volCcy24h", 0)) if ticker_data.get("volCcy24h") else None,
+                "symbol": symbol,
+                "timeframe": "ticker",
+                "is_confirmed": True
+            }
+            
+            # Execute callbacks for all timeframes (ticker represents current state)
+            for timeframe in ["1m", "5m", "1h", "1d"]:  # Broadcast to all timeframes
+                callback_key = f"{symbol}:{timeframe}"
+                if callback_key in self._callbacks:
+                    for callback in self._callbacks[callback_key]:
+                        try:
+                            if asyncio.iscoroutinefunction(callback):
+                                await callback(normalized_data)
+                            else:
+                                callback(normalized_data)
+                        except Exception as e:
+                            logger.error(f"Error in ticker callback: {e}")
+            
+            # Update subscription state
+            if symbol in self._subscriptions:
+                self._subscriptions[symbol].last_data = datetime.now(timezone.utc)
+                
+        except Exception as e:
+            logger.error(f"Error processing ticker data: {e}")
     
     async def _ping_loop(self):
         """Send periodic pings to keep connection alive."""
@@ -379,8 +414,8 @@ class WebSocketAPIClient(APIClientInterface):
         symbol: str, 
         timeframe: str, 
         callback: Optional[Callable[[Dict[str, Any]], None]] = None
-    ) -> AsyncIterator[Dict[str, Any]]:
-        """Watch OHLCV data via WebSocket."""
+    ) -> None:
+        """Set up WebSocket watch for OHLCV data via callback."""
         # Subscribe to symbol/timeframe
         success = await self.subscribe_symbol(symbol, [timeframe])
         if not success:
@@ -393,14 +428,7 @@ class WebSocketAPIClient(APIClientInterface):
                 self._callbacks[callback_key] = []
             self._callbacks[callback_key].append(callback)
         
-        # This is a placeholder - actual implementation would yield data
-        # For now, we'll implement this as subscription-based
-        logger.info(f"Watching {symbol} {timeframe} via WebSocket")
-        
-        # In a full implementation, this would be an async generator
-        # yielding real-time data. For now, we'll implement via callbacks.
-        if False:  # Placeholder condition
-            yield {}
+        logger.info(f"Set up WebSocket watch for {symbol} {timeframe} via callback")
 
     async def subscribe_symbol(self, symbol: str, timeframes: List[str]) -> bool:
         """Subscribe to WebSocket updates for a symbol and timeframes."""
@@ -408,21 +436,22 @@ class WebSocketAPIClient(APIClientInterface):
             if not self._is_connected:
                 await self.start_websocket()
             
-            # Create subscription messages for each timeframe
-            for timeframe in timeframes:
-                # Convert timeframe format (e.g., "1m" -> "candle1m")
-                channel = f"candle{timeframe}"
-                
+            # Create subscription messages (subscribe once per symbol, not per timeframe)
+            # Note: OKX WebSocket tickers channel provides real-time price updates
+            # We subscribe once per symbol to avoid duplicate subscriptions
+            if symbol not in self._subscriptions or not self._subscriptions[symbol].active:
                 subscribe_msg = {
                     "op": "subscribe",
                     "args": [{
-                        "channel": channel,
+                        "channel": "tickers",
                         "instId": symbol
                     }]
                 }
                 
                 await self._websocket.send(json.dumps(subscribe_msg))
-                logger.info(f"Subscribed to {symbol} {timeframe}")
+                logger.info(f"Subscribed to {symbol} ticker data")
+            else:
+                logger.debug(f"Already subscribed to {symbol}")
             
             # Update subscription state
             if symbol not in self._subscriptions:

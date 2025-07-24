@@ -263,7 +263,7 @@ class OKXAPIClient(APIClientInterface):
         symbol: str, 
         timeframe: str, 
         callback: Optional[Callable[[Dict[str, Any]], None]] = None
-    ) -> AsyncIterator[Dict[str, Any]]:
+    ) -> None:
         """WebSocket OHLCV streaming not supported in REST-only client."""
         raise NotImplementedError(
             "WebSocket functionality not available in REST-only API client. "

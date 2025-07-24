@@ -64,8 +64,8 @@ class APIClientInterface(ABC):
         symbol: str, 
         timeframe: str, 
         callback: Optional[Callable[[Dict[str, Any]], None]] = None
-    ) -> AsyncIterator[Dict[str, Any]]:
-        """Watch OHLCV data via WebSocket."""
+    ) -> None:
+        """Set up WebSocket watch for OHLCV data via callback."""
         pass
     
     @abstractmethod
